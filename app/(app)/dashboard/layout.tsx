@@ -1,6 +1,7 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import { logoutAction } from "@/app/_actions/auth";
+import { FormSubmitButton } from "@/components/form-submit-button";
 import { requireSubscriber } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,11 @@ export default async function DashboardLayout({
               Public site
             </Link>
             <form action={logoutAction}>
-              <button className="ui-solid-action rounded-full bg-[var(--color-ink)] px-4 py-2 text-white transition hover:bg-[var(--color-moss)]">
-                Log out
-              </button>
+              <FormSubmitButton
+                idleLabel="Log out"
+                pendingLabel="Logging out..."
+                className="ui-solid-action rounded-full bg-[var(--color-ink)] px-4 py-2 text-white transition hover:bg-[var(--color-moss)]"
+              />
             </form>
           </div>
         </div>
@@ -40,5 +43,3 @@ export default async function DashboardLayout({
     </div>
   );
 }
-
-

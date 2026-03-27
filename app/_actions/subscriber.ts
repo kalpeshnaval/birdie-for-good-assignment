@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { randomUUID } from "node:crypto";
 
@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 
 import { requireSubscriber } from "@/lib/auth";
 import { appConfig } from "@/lib/config";
+import { logError } from "@/lib/logger";
 import {
   addScore,
   createOrUpdateSubscription,
@@ -34,7 +35,16 @@ export async function addScoreAction(formData: FormData) {
     dashboardRedirect(parsed.error.issues[0]?.message ?? "Invalid score entry.");
   }
 
-  await addScore(user.id, parsed.data);
+  try {
+    await addScore(user.id, parsed.data);
+  } catch (error) {
+    logError("dashboard.add_score_failed", {
+      userId: user.id,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not add your score right now. Please try again.");
+  }
+
   revalidatePath("/dashboard");
   dashboardRedirect("Score added to your latest five.");
 }
@@ -51,10 +61,19 @@ export async function updateScoreAction(formData: FormData) {
     dashboardRedirect("Could not update that score.");
   }
 
-  await updateScore(user.id, {
-    scoreId,
-    ...parsed.data,
-  });
+  try {
+    await updateScore(user.id, {
+      scoreId,
+      ...parsed.data,
+    });
+  } catch (error) {
+    logError("dashboard.update_score_failed", {
+      userId: user.id,
+      scoreId,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not save that score update right now.");
+  }
 
   revalidatePath("/dashboard");
   dashboardRedirect("Score updated.");
@@ -71,7 +90,16 @@ export async function updateCharityPreferenceAction(formData: FormData) {
     dashboardRedirect("Could not save your charity preference.");
   }
 
-  await updateCharityPreference(user.id, parsed.data);
+  try {
+    await updateCharityPreference(user.id, parsed.data);
+  } catch (error) {
+    logError("dashboard.update_charity_failed", {
+      userId: user.id,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not update your charity settings right now.");
+  }
+
   revalidatePath("/dashboard");
   dashboardRedirect("Charity preferences updated.");
 }
@@ -89,16 +117,25 @@ export async function submitClaimAction(formData: FormData) {
     dashboardRedirect("Proof files must be 5MB or smaller.");
   }
 
-  const proofId = randomUUID();
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const proofPath = await saveProofFile(user.id, proofId, file.name, bytes);
+  try {
+    const proofId = randomUUID();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const proofPath = await saveProofFile(user.id, proofId, file.name, bytes);
 
-  await createWinnerClaim(user.id, {
-    drawId,
-    proofId,
-    proofPath,
-    fileName: file.name,
-  });
+    await createWinnerClaim(user.id, {
+      drawId,
+      proofId,
+      proofPath,
+      fileName: file.name,
+    });
+  } catch (error) {
+    logError("dashboard.submit_claim_failed", {
+      userId: user.id,
+      drawId,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not submit your proof right now. Please try again.");
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/admin");
@@ -113,7 +150,17 @@ export async function changePlanAction(formData: FormData) {
     dashboardRedirect("Choose a valid plan.");
   }
 
-  const billing = await getUserBillingDetails(user.id);
+  let billing;
+
+  try {
+    billing = await getUserBillingDetails(user.id);
+  } catch (error) {
+    logError("dashboard.billing_lookup_failed", {
+      userId: user.id,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not load your billing state right now.");
+  }
 
   if (appConfig.hasStripeCheckout) {
     const checkoutSession = await createCheckoutSession({
@@ -131,11 +178,20 @@ export async function changePlanAction(formData: FormData) {
     }
   }
 
-  await createOrUpdateSubscription(user.id, {
-    plan,
-    status: "active",
-    provider: "admin",
-  });
+  try {
+    await createOrUpdateSubscription(user.id, {
+      plan,
+      status: "active",
+      provider: "admin",
+    });
+  } catch (error) {
+    logError("dashboard.plan_change_failed", {
+      userId: user.id,
+      plan,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not update your subscription plan right now.");
+  }
 
   revalidatePath("/dashboard");
   dashboardRedirect(
@@ -147,7 +203,18 @@ export async function changePlanAction(formData: FormData) {
 
 export async function manageBillingAction() {
   const user = await requireSubscriber();
-  const billing = await getUserBillingDetails(user.id);
+
+  let billing;
+
+  try {
+    billing = await getUserBillingDetails(user.id);
+  } catch (error) {
+    logError("dashboard.billing_portal_lookup_failed", {
+      userId: user.id,
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    dashboardRedirect("Could not load your billing information right now.");
+  }
 
   if (!billing.user?.stripeCustomerId) {
     dashboardRedirect("No Stripe customer record exists yet for this account.");

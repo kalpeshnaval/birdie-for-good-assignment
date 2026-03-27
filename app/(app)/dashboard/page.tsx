@@ -1,4 +1,4 @@
-﻿import { CalendarDays, Gift, Heart, Target } from "lucide-react";
+import { CalendarDays, Gift, Heart, Target } from "lucide-react";
 
 import {
   addScoreAction,
@@ -8,6 +8,7 @@ import {
   updateCharityPreferenceAction,
   updateScoreAction,
 } from "@/app/_actions/subscriber";
+import { FormSubmitButton } from "@/components/form-submit-button";
 import { Card, Notice, SectionHeading, StatCard } from "@/components/ui";
 import { requireSubscriber } from "@/lib/auth";
 import { getCurrentMonthDraw, getUserDrawNumbers } from "@/lib/draws";
@@ -56,7 +57,7 @@ export default async function DashboardPage({
             />
             <StatCard
               label="Current numbers"
-              value={getUserDrawNumbers(snapshot.scores).join(" · ") || "No scores"}
+              value={getUserDrawNumbers(snapshot.scores).join(" / ") || "No scores"}
               hint="Your live set for draw matching uses the latest five values."
             />
             <StatCard
@@ -115,9 +116,11 @@ export default async function DashboardPage({
               className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-[var(--color-moss)]"
               required
             />
-            <button className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]">
-              Add score
-            </button>
+            <FormSubmitButton
+              idleLabel="Add score"
+              pendingLabel="Adding..."
+              className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]"
+            />
           </form>
           <div className="space-y-4">
             {snapshot.scores.map((score) => (
@@ -137,9 +140,11 @@ export default async function DashboardPage({
                   defaultValue={score.playedAt}
                   className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-[var(--color-moss)]"
                 />
-                <button className="rounded-full border border-black/10 px-5 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-                  Save
-                </button>
+                <FormSubmitButton
+                  idleLabel="Save"
+                  pendingLabel="Saving..."
+                  className="rounded-full border border-black/10 px-5 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+                />
               </form>
             ))}
           </div>
@@ -171,9 +176,11 @@ export default async function DashboardPage({
                 defaultValue={snapshot.user.charityPercentage}
                 className="rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none transition focus:border-[var(--color-moss)]"
               />
-              <button className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]">
-                Update
-              </button>
+              <FormSubmitButton
+                idleLabel="Update"
+                pendingLabel="Updating..."
+                className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]"
+              />
             </form>
           </Card>
 
@@ -184,28 +191,32 @@ export default async function DashboardPage({
             </div>
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
-              {([
-                ["monthly", "$29 / month"],
-                ["yearly", "$290 / year"],
-              ] as const).map(([plan, price]) => (
-                <form key={plan} action={changePlanAction} className="rounded-3xl border border-black/10 bg-[var(--color-sand)] p-4">
-                  <input type="hidden" name="plan" value={plan} />
-                  <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-muted)]">{plan}</p>
-                  <p className="mt-2 font-[family-name:var(--font-display)] text-4xl text-[var(--color-ink)]">{price}</p>
-                  <button className="mt-4 rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-                    Switch to {plan}
-                  </button>
+                {([
+                  ["monthly", "$29 / month"],
+                  ["yearly", "$290 / year"],
+                ] as const).map(([plan, price]) => (
+                  <form key={plan} action={changePlanAction} className="rounded-3xl border border-black/10 bg-[var(--color-sand)] p-4">
+                    <input type="hidden" name="plan" value={plan} />
+                    <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-muted)]">{plan}</p>
+                    <p className="mt-2 font-[family-name:var(--font-display)] text-4xl text-[var(--color-ink)]">{price}</p>
+                    <FormSubmitButton
+                      idleLabel={`Switch to ${plan}`}
+                      pendingLabel="Starting..."
+                      className="mt-4 rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+                    />
+                  </form>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <form action={manageBillingAction}>
+                  <FormSubmitButton
+                    idleLabel="Open billing portal"
+                    pendingLabel="Opening..."
+                    className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+                  />
                 </form>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <form action={manageBillingAction}>
-                <button className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-                  Open billing portal
-                </button>
-              </form>
-              <p className="text-sm leading-7 text-[var(--color-muted)]">Stripe-backed plans create or update subscriptions through checkout and webhooks. If Stripe is not configured, the admin-managed fallback stays available for testing.</p>
-            </div>
+                <p className="text-sm leading-7 text-[var(--color-muted)]">Stripe-backed plans create or update subscriptions through checkout and webhooks. If Stripe is not configured, the admin-managed fallback stays available for testing.</p>
+              </div>
             </div>
           </Card>
         </div>
@@ -242,9 +253,11 @@ export default async function DashboardPage({
                     required
                     className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm"
                   />
-                  <button className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]">
-                    Submit proof
-                  </button>
+                  <FormSubmitButton
+                    idleLabel="Submit proof"
+                    pendingLabel="Uploading..."
+                    className="ui-solid-action rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]"
+                  />
                 </form>
               )}
             </div>
@@ -258,23 +271,26 @@ export default async function DashboardPage({
           <h2 className="font-[family-name:var(--font-display)] text-4xl text-[var(--color-ink)]">Draw history</h2>
           <div className="space-y-4">
             {snapshot.draws.length === 0 ? (
-              <p className="text-sm text-[var(--color-muted)]">No draw history yet.</p>
+              <p className="text-sm leading-7 text-[var(--color-muted)]">
+                No published or simulated draws yet. Once admin publishes the next cycle, this space will show your match tier history.
+              </p>
             ) : (
-              snapshot.draws.slice(0, 4).map((draw) => {
+              snapshot.draws.map((draw) => {
                 const winner = draw.winners.find((entry) => entry.userId === user.id);
+
                 return (
                   <div key={draw.id} className="rounded-3xl border border-black/10 bg-[var(--color-sand)] p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-lg font-semibold text-[var(--color-ink)]">{draw.label}</p>
-                      <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">{draw.status}</p>
+                      <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">{draw.mode}</p>
                     </div>
                     <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-                      Winning numbers: {draw.winningNumbers.join(", ")}
+                      Numbers: {draw.winningNumbers.join(", ")} / pool {formatCurrency(draw.prizePoolCents)}
                     </p>
                     <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
                       {winner
-                        ? `You matched ${winner.matchTier} numbers and ${winner.status === "paid" ? "were paid" : "are in payout review"}.`
-                        : "You were entered in the cycle but did not land a winning tier this time."}
+                        ? `You matched ${winner.matchTier} numbers and ${winner.status === "paid" ? "were paid" : "are currently marked as " + winner.status}.`
+                        : "No winning tier this cycle."}
                     </p>
                   </div>
                 );
@@ -286,8 +302,3 @@ export default async function DashboardPage({
     </div>
   );
 }
-
-
-
-
-

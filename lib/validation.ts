@@ -1,11 +1,24 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 import { appConfig, planCatalog } from "@/lib/config";
 
+const emailSchema = z.string().trim().email("Enter a valid email address.");
+const passwordSchema = z.string().min(8, "Password must be at least 8 characters.");
+
 export const authSchema = z.object({
-  email: z.string().trim().email("Enter a valid email address."),
-  password: z.string().min(8, "Password must be at least 8 characters."),
+  email: emailSchema,
+  password: passwordSchema,
 });
+
+export const resetPasswordSchema = z
+  .object({
+    password: passwordSchema,
+    confirmPassword: passwordSchema,
+  })
+  .refine((value) => value.password === value.confirmPassword, {
+    message: "Passwords must match.",
+    path: ["confirmPassword"],
+  });
 
 export const signupSchema = authSchema.extend({
   name: z.string().trim().min(2, "Name must be at least 2 characters."),
@@ -47,4 +60,3 @@ export const claimReviewSchema = z.object({
   paymentStatus: z.enum(["pending", "processing", "paid", "rejected"]),
   notes: z.string().trim().min(2),
 });
-

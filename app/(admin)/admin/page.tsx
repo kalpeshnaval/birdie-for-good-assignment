@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 
 import {
   createCharityAction,
@@ -7,6 +7,7 @@ import {
   simulateDrawAction,
   updateSubscriberPlanAction,
 } from "@/app/_actions/admin";
+import { FormSubmitButton } from "@/components/form-submit-button";
 import { Card, Notice, StatCard } from "@/components/ui";
 import { getAdminSnapshot } from "@/lib/store";
 import { formatCurrency } from "@/lib/utils";
@@ -42,9 +43,11 @@ export default async function AdminPage({
               <option value="hot">Algorithmic hot scores</option>
               <option value="cold">Algorithmic cold scores</option>
             </select>
-            <button className="w-full rounded-full border border-black/10 px-5 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-              Run simulation
-            </button>
+            <FormSubmitButton
+              idleLabel="Run simulation"
+              pendingLabel="Running..."
+              className="w-full rounded-full border border-black/10 px-5 py-3 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+            />
           </form>
           <form action={publishDrawAction} className="space-y-3 rounded-3xl border border-black/10 bg-[var(--color-sand)] p-4">
             <select name="mode" className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none">
@@ -52,9 +55,11 @@ export default async function AdminPage({
               <option value="hot">Algorithmic hot scores</option>
               <option value="cold">Algorithmic cold scores</option>
             </select>
-            <button className="ui-solid-action w-full rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]">
-              Publish live draw
-            </button>
+            <FormSubmitButton
+              idleLabel="Publish live draw"
+              pendingLabel="Publishing..."
+              className="ui-solid-action w-full rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]"
+            />
           </form>
         </Card>
         <Card className="space-y-5">
@@ -112,9 +117,11 @@ export default async function AdminPage({
                           <option value="past_due">Past due</option>
                           <option value="canceled">Canceled</option>
                         </select>
-                        <button className="rounded-full border border-black/10 px-4 py-2 font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-                          Save subscription
-                        </button>
+                        <FormSubmitButton
+                          idleLabel="Save subscription"
+                          pendingLabel="Saving..."
+                          className="rounded-full border border-black/10 px-4 py-2 font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+                        />
                       </form>
                     </td>
                     <td className="px-3 py-4 text-[var(--color-muted)]">{subscription?.status ?? "inactive"}</td>
@@ -133,9 +140,11 @@ export default async function AdminPage({
             <input name="location" placeholder="Location" className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none" />
             <input name="headline" placeholder="Short headline" className="w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-sm outline-none" />
             <textarea name="summary" placeholder="Summary and mission" rows={5} className="w-full rounded-3xl border border-black/10 bg-white px-4 py-3 text-sm outline-none" />
-            <button className="ui-solid-action w-full rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]">
-              Add charity profile
-            </button>
+            <FormSubmitButton
+              idleLabel="Add charity profile"
+              pendingLabel="Adding..."
+              className="ui-solid-action w-full rounded-full bg-[var(--color-ink)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--color-moss)]"
+            />
           </form>
         </Card>
       </section>
@@ -169,9 +178,11 @@ export default async function AdminPage({
                     <option value="rejected">Rejected</option>
                   </select>
                   <textarea name="notes" defaultValue={claim.notes} rows={3} className="w-full rounded-3xl border border-black/10 bg-white px-4 py-3 text-sm outline-none" />
-                  <button className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
-                    Save claim review
-                  </button>
+                  <FormSubmitButton
+                    idleLabel="Save claim review"
+                    pendingLabel="Saving..."
+                    className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]"
+                  />
                 </form>
               ))
             )}
@@ -198,7 +209,3 @@ export default async function AdminPage({
     </div>
   );
 }
-
-
-
-

@@ -9,7 +9,11 @@ import { createCheckoutSession } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { listCharities, provisionUserAccount } from "@/lib/store";
-import { authSchema, signupSchema } from "@/lib/validation";
+import {
+  authSchema,
+  resetPasswordSchema,
+  signupSchema,
+} from "@/lib/validation";
 
 type AuthState = {
   message?: string;
@@ -17,9 +21,14 @@ type AuthState = {
 
 const authUserRetryDelayMs = 250;
 const authUserRetryCount = 8;
+const signupConfirmationPath = "/auth/confirm?next=/confirmed";
 
 function getAuthUnavailableMessage() {
   return "Supabase auth is not configured yet. Add your Supabase environment variables to enable sign-in.";
+}
+
+function buildAbsoluteUrl(path: string) {
+  return new URL(path, appConfig.appUrl).toString();
 }
 
 function sleep(milliseconds: number) {
@@ -169,6 +178,82 @@ export async function loginAction(_: AuthState, formData: FormData) {
   redirect(profile?.role === "admin" ? "/admin" : "/dashboard");
 }
 
+export async function resendConfirmationAction(_: AuthState, formData: FormData) {
+  if (!appConfig.hasSupabase) {
+    return { message: getAuthUnavailableMessage() } satisfies AuthState;
+  }
+
+  const parsed = authSchema.pick({ email: true }).safeParse({
+    email: formData.get("email"),
+  });
+
+  if (!parsed.success) {
+    return {
+      message: parsed.error.issues[0]?.message ?? "Enter a valid email address.",
+    } satisfies AuthState;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.auth.resend({
+    type: "signup",
+    email: parsed.data.email,
+    options: {
+      emailRedirectTo: buildAbsoluteUrl(signupConfirmationPath),
+    },
+  });
+
+  if (error) {
+    return {
+      message: error.message ?? "Could not resend the confirmation email.",
+    } satisfies AuthState;
+  }
+
+  redirect(
+    `/check-email?mode=signup&email=${encodeURIComponent(parsed.data.email)}&notice=${encodeURIComponent("A fresh confirmation email has been sent.")}`,
+  );
+}
+
+export async function resetPasswordAction(_: AuthState, formData: FormData) {
+  if (!appConfig.hasSupabase) {
+    return { message: getAuthUnavailableMessage() } satisfies AuthState;
+  }
+
+  const parsed = resetPasswordSchema.safeParse({
+    password: formData.get("password"),
+    confirmPassword: formData.get("confirmPassword"),
+  });
+
+  if (!parsed.success) {
+    return {
+      message: parsed.error.issues[0]?.message ?? "Please review the new password.",
+    } satisfies AuthState;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      message: "Open the reset link from your email first, then choose a new password.",
+    } satisfies AuthState;
+  }
+
+  const { error } = await supabase.auth.updateUser({
+    password: parsed.data.password,
+  });
+
+  if (error) {
+    return {
+      message: error.message ?? "Could not update your password.",
+    } satisfies AuthState;
+  }
+
+  await supabase.auth.signOut();
+  redirect("/login?notice=Password%20updated.%20Sign%20in%20with%20your%20new%20password.");
+}
+
 export async function signupAction(_: AuthState, formData: FormData) {
   if (!appConfig.hasSupabase || !appConfig.hasSupabaseAdmin) {
     return {
@@ -197,6 +282,7 @@ export async function signupAction(_: AuthState, formData: FormData) {
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
+      emailRedirectTo: buildAbsoluteUrl(signupConfirmationPath),
       data: {
         name: parsed.data.name,
       },
@@ -254,7 +340,7 @@ export async function signupAction(_: AuthState, formData: FormData) {
     return {
       message:
         "Your auth account was created, but profile setup did not finish. Try logging in, or retry signup in a moment.",
-    } satisfies AuthState;
+      } satisfies AuthState;
   }
 
   await sendPlatformEmail({
@@ -282,7 +368,9 @@ export async function signupAction(_: AuthState, formData: FormData) {
   }
 
   if (!data.session) {
-    redirect("/login?notice=Account%20created.%20Verify%20your%20email%20and%20sign%20in.");
+    redirect(
+      `/check-email?mode=signup&email=${encodeURIComponent(parsed.data.email)}&notice=${encodeURIComponent("Your account is created. Confirm your email to unlock member access.")}`,
+    );
   }
 
   redirect(
