@@ -1,17 +1,4 @@
-﻿create extension if not exists pgcrypto;
-
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-as $$
-  select exists (
-    select 1
-    from public.profiles
-    where id = auth.uid()
-      and role = 'admin'
-  );
-$$;
+create extension if not exists pgcrypto;
 
 create table if not exists public.charities (
   id uuid primary key default gen_random_uuid(),
@@ -122,6 +109,19 @@ create index if not exists winner_claims_user_id_submitted_at_idx on public.winn
 create index if not exists notifications_user_id_created_at_idx on public.notifications (user_id, created_at desc);
 create index if not exists audit_logs_created_at_idx on public.audit_logs (created_at desc);
 
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1
+    from public.profiles
+    where id = auth.uid()
+      and role = 'admin'
+  );
+$$;
+
 alter table public.charities enable row level security;
 alter table public.profiles enable row level security;
 alter table public.subscriptions enable row level security;
@@ -131,65 +131,79 @@ alter table public.winner_claims enable row level security;
 alter table public.notifications enable row level security;
 alter table public.audit_logs enable row level security;
 
-create policy if not exists "public can read charities"
+drop policy if exists "public can read charities" on public.charities;
+create policy "public can read charities"
   on public.charities for select
   using (true);
 
-create policy if not exists "users can read own profile"
+drop policy if exists "users can read own profile" on public.profiles;
+create policy "users can read own profile"
   on public.profiles for select
   using (auth.uid() = id or public.is_admin());
 
-create policy if not exists "users can update own profile"
+drop policy if exists "users can update own profile" on public.profiles;
+create policy "users can update own profile"
   on public.profiles for update
   using (auth.uid() = id or public.is_admin())
   with check (auth.uid() = id or public.is_admin());
 
-create policy if not exists "users can insert own profile"
+drop policy if exists "users can insert own profile" on public.profiles;
+create policy "users can insert own profile"
   on public.profiles for insert
   with check (auth.uid() = id or public.is_admin());
 
-create policy if not exists "users can read own subscription"
+drop policy if exists "users can read own subscription" on public.subscriptions;
+create policy "users can read own subscription"
   on public.subscriptions for select
   using (auth.uid() = user_id or public.is_admin());
 
-create policy if not exists "admins manage subscriptions"
+drop policy if exists "admins manage subscriptions" on public.subscriptions;
+create policy "admins manage subscriptions"
   on public.subscriptions for all
   using (public.is_admin())
   with check (public.is_admin());
 
-create policy if not exists "users manage own scores"
+drop policy if exists "users manage own scores" on public.scores;
+create policy "users manage own scores"
   on public.scores for all
   using (auth.uid() = user_id or public.is_admin())
   with check (auth.uid() = user_id or public.is_admin());
 
-create policy if not exists "public can read published draws"
+drop policy if exists "public can read published draws" on public.draws;
+create policy "public can read published draws"
   on public.draws for select
   using (status = 'published' or public.is_admin());
 
-create policy if not exists "admins manage draws"
+drop policy if exists "admins manage draws" on public.draws;
+create policy "admins manage draws"
   on public.draws for all
   using (public.is_admin())
   with check (public.is_admin());
 
-create policy if not exists "users manage own claims"
+drop policy if exists "users manage own claims" on public.winner_claims;
+create policy "users manage own claims"
   on public.winner_claims for all
   using (auth.uid() = user_id or public.is_admin())
   with check (auth.uid() = user_id or public.is_admin());
 
-create policy if not exists "users read own notifications"
+drop policy if exists "users read own notifications" on public.notifications;
+create policy "users read own notifications"
   on public.notifications for select
   using (auth.uid() = user_id or public.is_admin());
 
-create policy if not exists "admins manage notifications"
+drop policy if exists "admins manage notifications" on public.notifications;
+create policy "admins manage notifications"
   on public.notifications for all
   using (public.is_admin())
   with check (public.is_admin());
 
-create policy if not exists "admins read audit logs"
+drop policy if exists "admins read audit logs" on public.audit_logs;
+create policy "admins read audit logs"
   on public.audit_logs for select
   using (public.is_admin());
 
-create policy if not exists "admins manage audit logs"
+drop policy if exists "admins manage audit logs" on public.audit_logs;
+create policy "admins manage audit logs"
   on public.audit_logs for all
   using (public.is_admin())
   with check (public.is_admin());
