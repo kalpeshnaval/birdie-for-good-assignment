@@ -1,8 +1,9 @@
-﻿import "server-only";
+import "server-only";
 
 import { Resend } from "resend";
 
 import { appConfig } from "@/lib/config";
+import { logError } from "@/lib/logger";
 
 const resend = new Resend(appConfig.resendApiKey ?? "re_xxxxxxxxx");
 // Replace `re_xxxxxxxxx` with your real Resend API key, or set RESEND_API_KEY in `.env.local`.
@@ -29,14 +30,24 @@ export async function sendPlatformEmail(input: {
     return { status: "skipped" as const };
   }
 
-  await resendClient.emails.send({
-    from: appConfig.emailFrom,
-    to: input.to,
-    subject: input.subject,
-    html: input.html,
-  });
+  try {
+    await resendClient.emails.send({
+      from: appConfig.emailFrom,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+    });
 
-  return { status: "sent" as const };
+    return { status: "sent" as const };
+  } catch (error) {
+    logError("email.send_failed", {
+      message: error instanceof Error ? error.message : "Unknown email error",
+      to: input.to,
+      subject: input.subject,
+    });
+
+    return { status: "skipped" as const };
+  }
 }
 
 export async function sendHelloWorldEmail() {

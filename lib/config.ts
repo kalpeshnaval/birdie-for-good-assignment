@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 
 export const planCatalog = {
   monthly: {
@@ -57,6 +57,52 @@ const parsedEnv = appEnvSchema.parse({
   CRON_SECRET: process.env.CRON_SECRET,
 });
 
+function normalizeEnvValue(value: string | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function getConfiguredEnvValue(value: string | undefined) {
+  const normalized = normalizeEnvValue(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  const lowerCasedValue = normalized.toLowerCase();
+  const placeholderPatterns = [
+    "xxxxxxxx",
+    "placeholder",
+    "your-project-ref",
+    "change-this",
+  ];
+
+  if (placeholderPatterns.some((pattern) => lowerCasedValue.includes(pattern))) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+const configuredEnv = {
+  appUrl: getConfiguredEnvValue(parsedEnv.NEXT_PUBLIC_APP_URL),
+  supabaseUrl: getConfiguredEnvValue(parsedEnv.NEXT_PUBLIC_SUPABASE_URL),
+  supabasePublishableKey: getConfiguredEnvValue(
+    parsedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  ),
+  supabaseServiceRoleKey: getConfiguredEnvValue(
+    parsedEnv.SUPABASE_SERVICE_ROLE_KEY,
+  ),
+  proofsBucket: normalizeEnvValue(parsedEnv.SUPABASE_PROOFS_BUCKET),
+  stripeSecretKey: getConfiguredEnvValue(parsedEnv.STRIPE_SECRET_KEY),
+  stripeWebhookSecret: getConfiguredEnvValue(parsedEnv.STRIPE_WEBHOOK_SECRET),
+  stripeMonthlyPriceId: getConfiguredEnvValue(parsedEnv.STRIPE_MONTHLY_PRICE_ID),
+  stripeYearlyPriceId: getConfiguredEnvValue(parsedEnv.STRIPE_YEARLY_PRICE_ID),
+  resendApiKey: getConfiguredEnvValue(parsedEnv.RESEND_API_KEY),
+  emailFrom: getConfiguredEnvValue(parsedEnv.EMAIL_FROM),
+  cronSecret: getConfiguredEnvValue(parsedEnv.CRON_SECRET),
+};
+
 const adminEmails = (parsedEnv.PLATFORM_ADMIN_EMAILS ?? "")
   .split(",")
   .map((entry) => entry.trim().toLowerCase())
@@ -64,7 +110,7 @@ const adminEmails = (parsedEnv.PLATFORM_ADMIN_EMAILS ?? "")
 
 export const appConfig = {
   appName: "Birdie for Good",
-  appUrl: parsedEnv.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+  appUrl: configuredEnv.appUrl ?? "http://localhost:3000",
   defaultCharityPercentage: 10,
   minimumCharityPercentage: 10,
   prizePoolPercentage: 35,
@@ -74,32 +120,33 @@ export const appConfig = {
   },
   maxScoresPerUser: 5,
   adminEmails,
-  supabaseUrl: parsedEnv.NEXT_PUBLIC_SUPABASE_URL,
-  supabasePublishableKey: parsedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-  supabaseServiceRoleKey: parsedEnv.SUPABASE_SERVICE_ROLE_KEY,
-  proofsBucket: parsedEnv.SUPABASE_PROOFS_BUCKET ?? "winner-proofs",
+  supabaseUrl: configuredEnv.supabaseUrl,
+  supabasePublishableKey: configuredEnv.supabasePublishableKey,
+  supabaseServiceRoleKey: configuredEnv.supabaseServiceRoleKey,
+  proofsBucket: configuredEnv.proofsBucket ?? "winner-proofs",
   hasSupabase:
-    Boolean(parsedEnv.NEXT_PUBLIC_SUPABASE_URL) &&
-    Boolean(parsedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY),
+    Boolean(configuredEnv.supabaseUrl) &&
+    Boolean(configuredEnv.supabasePublishableKey),
   hasSupabaseAdmin:
-    Boolean(parsedEnv.NEXT_PUBLIC_SUPABASE_URL) &&
-    Boolean(parsedEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) &&
-    Boolean(parsedEnv.SUPABASE_SERVICE_ROLE_KEY),
-  stripeSecretKey: parsedEnv.STRIPE_SECRET_KEY,
-  stripeWebhookSecret: parsedEnv.STRIPE_WEBHOOK_SECRET,
-  stripeMonthlyPriceId: parsedEnv.STRIPE_MONTHLY_PRICE_ID,
-  stripeYearlyPriceId: parsedEnv.STRIPE_YEARLY_PRICE_ID,
+    Boolean(configuredEnv.supabaseUrl) &&
+    Boolean(configuredEnv.supabasePublishableKey) &&
+    Boolean(configuredEnv.supabaseServiceRoleKey),
+  stripeSecretKey: configuredEnv.stripeSecretKey,
+  stripeWebhookSecret: configuredEnv.stripeWebhookSecret,
+  stripeMonthlyPriceId: configuredEnv.stripeMonthlyPriceId,
+  stripeYearlyPriceId: configuredEnv.stripeYearlyPriceId,
   hasStripeCheckout:
-    Boolean(parsedEnv.STRIPE_SECRET_KEY) &&
-    Boolean(parsedEnv.STRIPE_MONTHLY_PRICE_ID) &&
-    Boolean(parsedEnv.STRIPE_YEARLY_PRICE_ID),
+    Boolean(configuredEnv.stripeSecretKey) &&
+    Boolean(configuredEnv.stripeMonthlyPriceId) &&
+    Boolean(configuredEnv.stripeYearlyPriceId),
   hasStripeWebhooks:
-    Boolean(parsedEnv.STRIPE_SECRET_KEY) &&
-    Boolean(parsedEnv.STRIPE_WEBHOOK_SECRET),
-  hasEmail: Boolean(parsedEnv.RESEND_API_KEY) && Boolean(parsedEnv.EMAIL_FROM),
-  resendApiKey: parsedEnv.RESEND_API_KEY,
-  emailFrom: parsedEnv.EMAIL_FROM,
-  cronSecret: parsedEnv.CRON_SECRET,
+    Boolean(configuredEnv.stripeSecretKey) &&
+    Boolean(configuredEnv.stripeWebhookSecret),
+  hasEmail:
+    Boolean(configuredEnv.resendApiKey) && Boolean(configuredEnv.emailFrom),
+  resendApiKey: configuredEnv.resendApiKey,
+  emailFrom: configuredEnv.emailFrom,
+  cronSecret: configuredEnv.cronSecret,
 } as const;
 
 export function isConfiguredAdminEmail(email: string) {

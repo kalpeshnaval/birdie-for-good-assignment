@@ -1,8 +1,9 @@
-﻿import "server-only";
+import "server-only";
 
 import Stripe from "stripe";
 
 import { appConfig, planCatalog } from "@/lib/config";
+import { logError } from "@/lib/logger";
 import type { SubscriptionPlan, SubscriptionStatus } from "@/lib/types";
 
 let stripeClient: Stripe | null = null;
@@ -38,36 +39,46 @@ export async function createCheckoutSession(input: {
     return null;
   }
 
-  return stripe.checkout.sessions.create({
-    mode: "subscription",
-    success_url: `${appConfig.appUrl}/dashboard?notice=${encodeURIComponent("Subscription active and ready for the next draw.")}`,
-    cancel_url: `${appConfig.appUrl}/signup?notice=${encodeURIComponent("Checkout canceled before activation.")}`,
-    customer: input.stripeCustomerId ?? undefined,
-    customer_email: input.stripeCustomerId ? undefined : input.email,
-    client_reference_id: input.userId,
-    allow_promotion_codes: true,
-    billing_address_collection: "auto",
-    metadata: {
-      user_id: input.userId,
-      plan: input.plan,
-      charity_id: input.charityId,
-      charity_percentage: String(input.charityPercentage),
-    },
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
-      },
-    ],
-    subscription_data: {
+  try {
+    return await stripe.checkout.sessions.create({
+      mode: "subscription",
+      success_url: `${appConfig.appUrl}/dashboard?notice=${encodeURIComponent("Subscription active and ready for the next draw.")}`,
+      cancel_url: `${appConfig.appUrl}/signup?notice=${encodeURIComponent("Checkout canceled before activation.")}`,
+      customer: input.stripeCustomerId ?? undefined,
+      customer_email: input.stripeCustomerId ? undefined : input.email,
+      client_reference_id: input.userId,
+      allow_promotion_codes: true,
+      billing_address_collection: "auto",
       metadata: {
         user_id: input.userId,
         plan: input.plan,
         charity_id: input.charityId,
         charity_percentage: String(input.charityPercentage),
       },
-    },
-  });
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      subscription_data: {
+        metadata: {
+          user_id: input.userId,
+          plan: input.plan,
+          charity_id: input.charityId,
+          charity_percentage: String(input.charityPercentage),
+        },
+      },
+    });
+  } catch (error) {
+    logError("stripe.checkout_session_failed", {
+      message: error instanceof Error ? error.message : "Unknown Stripe error",
+      plan: input.plan,
+      userId: input.userId,
+      priceId,
+    });
+    return null;
+  }
 }
 
 export async function createBillingPortalSession(input: {
@@ -79,10 +90,18 @@ export async function createBillingPortalSession(input: {
     return null;
   }
 
-  return stripe.billingPortal.sessions.create({
-    customer: input.customerId,
-    return_url: `${appConfig.appUrl}/dashboard?notice=${encodeURIComponent("Billing session closed.")}`,
-  });
+  try {
+    return await stripe.billingPortal.sessions.create({
+      customer: input.customerId,
+      return_url: `${appConfig.appUrl}/dashboard?notice=${encodeURIComponent("Billing session closed.")}`,
+    });
+  } catch (error) {
+    logError("stripe.billing_portal_failed", {
+      message: error instanceof Error ? error.message : "Unknown Stripe error",
+      customerId: input.customerId,
+    });
+    return null;
+  }
 }
 
 export function mapStripeStatus(status: Stripe.Subscription.Status): SubscriptionStatus {
