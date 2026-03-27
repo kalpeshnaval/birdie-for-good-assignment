@@ -1,6 +1,7 @@
 ﻿import "server-only";
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { nanoid } from "nanoid";
 import { compareDesc, format, parseISO } from "date-fns";
@@ -31,9 +32,14 @@ import type {
   WinnerClaim,
 } from "@/lib/types";
 
-const dataDirectory = path.join(process.cwd(), "data");
-const storePath = path.join(dataDirectory, "demo-store.json");
-const uploadsDirectory = path.join(dataDirectory, "proofs");
+const sourceDataDirectory = path.join(process.cwd(), "data");
+const runtimeDataDirectory =
+  process.env.NODE_ENV === "production"
+    ? path.join(tmpdir(), "birdie-for-good")
+    : sourceDataDirectory;
+const sourceStorePath = path.join(sourceDataDirectory, "demo-store.json");
+const storePath = path.join(runtimeDataDirectory, "demo-store.json");
+const uploadsDirectory = path.join(runtimeDataDirectory, "proofs");
 
 let writeQueue = Promise.resolve();
 
@@ -111,12 +117,22 @@ function getIsoNow() {
 }
 
 async function ensureDemoState() {
-  await mkdir(dataDirectory, { recursive: true });
+  await mkdir(runtimeDataDirectory, { recursive: true });
   await mkdir(uploadsDirectory, { recursive: true });
 
   try {
     await readFile(storePath, "utf8");
   } catch {
+    if (storePath !== sourceStorePath) {
+      try {
+        const packagedState = await readFile(sourceStorePath, "utf8");
+        await writeFile(storePath, packagedState, "utf8");
+        return;
+      } catch {
+        // Fall back to generating the bundled demo state when no packaged seed exists.
+      }
+    }
+
     const now = getIsoNow();
     const adminUserId = "user-admin";
     const playerUserId = "user-player";
@@ -763,3 +779,6 @@ export async function runDraw(mode: DrawMode, shouldPublish: boolean) {
   await persistState(state);
   return draw;
 }
+
+
+

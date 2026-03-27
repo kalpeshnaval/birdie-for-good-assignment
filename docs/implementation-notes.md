@@ -13,6 +13,11 @@ To keep the app fully runnable before external credentials are configured, the f
 
 This means the app works end-to-end right now, while still being structured so we can swap the data layer for Supabase later.
 
+## Deployment Note
+
+On Vercel, the deployed project directory is read-only at runtime. To keep the demo-safe version from crashing in production, the app copies its packaged demo JSON store into the server's temporary directory in production before reading or writing it.
+
+That keeps the public pages and server actions working, but the data is still ephemeral in production. For real persistence across deploys and instances, the next upgrade should move the store to a hosted database and object storage.
 ## Main Assumptions
 
 These PRD details were not explicitly fixed, so the current build uses sensible defaults:
@@ -42,4 +47,6 @@ These PRD details were not explicitly fixed, so the current build uses sensible 
 ## Next Steps
 
 When real infrastructure is ready, we can replace the demo store with a Supabase adapter and turn on live Stripe/Resend credentials without redesigning the UI or business logic.
+
+
 
