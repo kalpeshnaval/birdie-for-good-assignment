@@ -178,12 +178,18 @@ export default async function AdminPage({
           </div>
         </Card>
         <Card className="space-y-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--color-moss)]">Recent system notes</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--color-moss)]">Notifications and audit trail</p>
           <div className="space-y-4">
             {snapshot.notifications.map((notification) => (
               <div key={notification.id} className="rounded-3xl border border-black/10 bg-[var(--color-sand)] p-4">
                 <p className="text-sm font-semibold text-[var(--color-ink)]">{notification.subject}</p>
                 <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">{notification.preview}</p>
+              </div>
+            ))}
+            {snapshot.auditLogs.map((entry) => (
+              <div key={entry.id} className="rounded-3xl border border-black/10 bg-white p-4">
+                <p className="text-sm font-semibold text-[var(--color-ink)]">{entry.action.replace(/_/g, " ")}</p>
+                <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">{entry.detail}</p>
               </div>
             ))}
           </div>
@@ -192,5 +198,7 @@ export default async function AdminPage({
     </div>
   );
 }
+
+
 
 

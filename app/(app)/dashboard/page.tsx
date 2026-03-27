@@ -3,6 +3,7 @@
 import {
   addScoreAction,
   changePlanAction,
+  manageBillingAction,
   submitClaimAction,
   updateCharityPreferenceAction,
   updateScoreAction,
@@ -181,7 +182,8 @@ export default async function DashboardPage({
               <CalendarDays className="h-5 w-5 text-[var(--color-gold)]" />
               <h2 className="font-[family-name:var(--font-display)] text-4xl text-[var(--color-ink)]">Plan control</h2>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
               {([
                 ["monthly", "$29 / month"],
                 ["yearly", "$290 / year"],
@@ -195,6 +197,15 @@ export default async function DashboardPage({
                   </button>
                 </form>
               ))}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <form action={manageBillingAction}>
+                <button className="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-moss)] hover:text-[var(--color-moss)]">
+                  Open billing portal
+                </button>
+              </form>
+              <p className="text-sm leading-7 text-[var(--color-muted)]">Stripe-backed plans create or update subscriptions through checkout and webhooks. If Stripe is not configured, the admin-managed fallback stays available for testing.</p>
+            </div>
             </div>
           </Card>
         </div>
@@ -275,5 +286,8 @@ export default async function DashboardPage({
     </div>
   );
 }
+
+
+
 
 

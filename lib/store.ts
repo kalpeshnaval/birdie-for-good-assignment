@@ -1,12 +1,10 @@
 ﻿import "server-only";
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { nanoid } from "nanoid";
-import { compareDesc, format, parseISO } from "date-fns";
+import { randomUUID } from "node:crypto";
 
-import { appConfig, demoCredentials, planCatalog } from "@/lib/config";
+import { format } from "date-fns";
+
+import { appConfig, isConfiguredAdminEmail, planCatalog } from "@/lib/config";
 import {
   generateWinningNumbers,
   getMatchTier,
@@ -15,15 +13,21 @@ import {
   getPrizePoolCents,
   keepLatestScores,
 } from "@/lib/draws";
-import { hashPassword } from "@/lib/hash";
+import { logError, logInfo } from "@/lib/logger";
+import { sendPlatformEmail } from "@/lib/providers";
+import { seedCharities } from "@/lib/seed-data";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type {
+  AdminSnapshot,
+  AuditLog,
   Charity,
+  CharityEvent,
   DashboardSnapshot,
-  DemoState,
   DrawMode,
   DrawRun,
   MatchTier,
   ReviewStatus,
+  ScoreEntry,
   Subscription,
   SubscriptionPlan,
   SubscriptionStatus,
@@ -32,355 +36,540 @@ import type {
   WinnerClaim,
 } from "@/lib/types";
 
-const sourceDataDirectory = path.join(process.cwd(), "data");
-const runtimeDataDirectory =
-  process.env.NODE_ENV === "production"
-    ? path.join(tmpdir(), "birdie-for-good")
-    : sourceDataDirectory;
-const sourceStorePath = path.join(sourceDataDirectory, "demo-store.json");
-const storePath = path.join(runtimeDataDirectory, "demo-store.json");
-const uploadsDirectory = path.join(runtimeDataDirectory, "proofs");
-
-let writeQueue = Promise.resolve();
-
-const seededCharities: Charity[] = [
-  {
-    id: "charity-river",
-    slug: "river-reset",
-    name: "River Reset",
-    location: "Austin, Texas",
-    headline: "Restoring urban waterways through youth-led cleanups.",
-    summary:
-      "River Reset funds cleanup crews, school workshops, and weekend restoration projects around city water systems.",
-    mission:
-      "The charity turns every member contribution into visible, local environmental action with volunteer programs and educational events.",
-    imageGradient: "from-emerald-400 via-teal-500 to-cyan-600",
-    featured: true,
-    tags: ["Environment", "Youth", "Community"],
-    events: [
-      {
-        id: "river-event-1",
-        title: "Spring Charity Scramble",
-        location: "Barton Creek",
-        date: "2026-04-19",
-      },
-    ],
-  },
-  {
-    id: "charity-caddie",
-    slug: "caddie-futures",
-    name: "Caddie Futures",
-    location: "Scottsdale, Arizona",
-    headline: "Opening pathways into sport, study, and leadership.",
-    summary:
-      "Caddie Futures supports scholarships, mentorship, and equipment access for underrepresented young golfers.",
-    mission:
-      "The organization helps talented young players gain confidence, experience, and better opportunities on and off the course.",
-    imageGradient: "from-amber-400 via-orange-500 to-rose-500",
-    featured: true,
-    tags: ["Education", "Sport", "Mentorship"],
-    events: [
-      {
-        id: "caddie-event-1",
-        title: "Scholarship Invitational",
-        location: "Troon North",
-        date: "2026-05-04",
-      },
-    ],
-  },
-  {
-    id: "charity-heart",
-    slug: "hearts-on-course",
-    name: "Hearts on Course",
-    location: "St Andrews, Scotland",
-    headline: "Creating calm, outdoor moments for families facing illness.",
-    summary:
-      "Hearts on Course helps families access respite retreats, counseling, and supportive community experiences.",
-    mission:
-      "By pairing fundraising with meaningful storytelling, the charity creates tangible emotional support for households under pressure.",
-    imageGradient: "from-fuchsia-500 via-pink-500 to-orange-400",
-    featured: true,
-    tags: ["Health", "Families", "Wellbeing"],
-    events: [
-      {
-        id: "heart-event-1",
-        title: "Evening Impact Dinner",
-        location: "Old Course Hotel",
-        date: "2026-06-12",
-      },
-    ],
-  },
-];
+const storageBucket = appConfig.proofsBucket;
 
 function getIsoNow() {
   return new Date().toISOString();
 }
 
-async function ensureDemoState() {
-  await mkdir(runtimeDataDirectory, { recursive: true });
-  await mkdir(uploadsDirectory, { recursive: true });
-
-  try {
-    await readFile(storePath, "utf8");
-  } catch {
-    if (storePath !== sourceStorePath) {
-      try {
-        const packagedState = await readFile(sourceStorePath, "utf8");
-        await writeFile(storePath, packagedState, "utf8");
-        return;
-      } catch {
-        // Fall back to generating the bundled demo state when no packaged seed exists.
-      }
-    }
-
-    const now = getIsoNow();
-    const adminUserId = "user-admin";
-    const playerUserId = "user-player";
-    const starterScores: Array<[number, string]> = [
-      [35, "2026-03-01"],
-      [37, "2026-03-05"],
-      [31, "2026-03-10"],
-      [39, "2026-03-15"],
-      [33, "2026-03-21"],
-    ];
-
-    const initialState: DemoState = {
-      users: [
-        {
-          id: adminUserId,
-          name: "Admin Captain",
-          email: demoCredentials.admin.email,
-          passwordHash: hashPassword(demoCredentials.admin.password),
-          role: "admin",
-          createdAt: now,
-          selectedCharityId: "charity-caddie",
-          charityPercentage: 15,
-          avatarSeed: "admin-captain",
-        },
-        {
-          id: playerUserId,
-          name: "Avery Stone",
-          email: demoCredentials.subscriber.email,
-          passwordHash: hashPassword(demoCredentials.subscriber.password),
-          role: "subscriber",
-          createdAt: now,
-          selectedCharityId: "charity-river",
-          charityPercentage: appConfig.defaultCharityPercentage,
-          avatarSeed: "avery-stone",
-        },
-      ],
-      subscriptions: [
-        {
-          id: "subscription-player",
-          userId: playerUserId,
-          plan: "yearly",
-          status: "active",
-          provider: "demo",
-          amountCents: planCatalog.yearly.priceCents,
-          startedAt: "2026-01-10",
-          renewalDate: "2027-01-10",
-        },
-      ],
-      charities: seededCharities,
-      scores: starterScores.map(([value, playedAt], index) => ({
-        id: `score-${index + 1}`,
-        userId: playerUserId,
-        value,
-        playedAt,
-        createdAt: now,
-        updatedAt: now,
-      })),
-      draws: [],
-      claims: [],
-      notifications: [],
-    };
-
-    await writeFile(storePath, JSON.stringify(initialState, null, 2), "utf8");
+function ensureSupabaseAdmin() {
+  if (!appConfig.hasSupabaseAdmin) {
+    throw new Error(
+      "Supabase admin configuration is missing. Add the Supabase environment variables before using data mutations.",
+    );
   }
+
+  return createSupabaseAdminClient();
 }
 
-async function readState() {
-  await ensureDemoState();
-  const file = await readFile(storePath, "utf8");
-  return JSON.parse(file) as DemoState;
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
-function persistState(state: DemoState) {
-  writeQueue = writeQueue.then(() =>
-    writeFile(storePath, JSON.stringify(state, null, 2), "utf8"),
-  );
-  return writeQueue;
+function normalizeFileName(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-");
 }
 
-function addNotification(
-  state: DemoState,
-  notification: Omit<SystemNotification, "id" | "createdAt">,
-) {
-  state.notifications.unshift({
-    id: nanoid(),
-    createdAt: getIsoNow(),
-    ...notification,
+function parseCharityEvents(value: unknown): CharityEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(Boolean).map((entry, index) => {
+    const event = (entry ?? {}) as Partial<CharityEvent>;
+
+    return {
+      id: event.id ?? `event-${index + 1}`,
+      title: event.title ?? "Upcoming event",
+      location: event.location ?? "TBD",
+      date: event.date ?? format(new Date(), "yyyy-MM-dd"),
+    } satisfies CharityEvent;
   });
 }
 
-function getSubscriptionForUser(state: DemoState, userId: string) {
-  return (
-    [...state.subscriptions]
-      .filter((subscription) => subscription.userId === userId)
-      .sort((left, right) =>
-        compareDesc(parseISO(left.startedAt), parseISO(right.startedAt)),
-      )[0] ?? null
-  );
+function parseStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
-function getLatestPublishedDraw(state: DemoState) {
-  return (
-    [...state.draws]
-      .filter((draw) => draw.status === "published")
-      .sort((left, right) =>
-        compareDesc(parseISO(left.createdAt), parseISO(right.createdAt)),
-      )[0] ?? null
-  );
+function parseDrawWinners(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      const winner = entry as DrawRun["winners"][number];
+
+      if (!winner?.userId || !winner?.matchTier) {
+        return null;
+      }
+
+      return {
+        userId: winner.userId,
+        matchTier: winner.matchTier,
+        prizeCents: Number(winner.prizeCents ?? 0),
+        status: winner.status ?? "pending",
+      } satisfies DrawRun["winners"][number];
+    })
+    .filter(Boolean) as DrawRun["winners"];
+}
+
+function mapCharity(row: Record<string, unknown>): Charity {
+  return {
+    id: String(row.id),
+    slug: String(row.slug),
+    name: String(row.name),
+    location: String(row.location),
+    headline: String(row.headline),
+    summary: String(row.summary),
+    mission: String(row.mission),
+    imageGradient: String(row.image_gradient),
+    featured: Boolean(row.featured),
+    tags: parseStringArray(row.tags),
+    events: parseCharityEvents(row.events),
+    createdAt: row.created_at ? String(row.created_at) : undefined,
+  };
+}
+
+function mapUser(row: Record<string, unknown>): User {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    email: String(row.email),
+    role: row.role === "admin" ? "admin" : "subscriber",
+    createdAt: String(row.created_at),
+    selectedCharityId: row.selected_charity_id ? String(row.selected_charity_id) : null,
+    charityPercentage: Number(row.charity_percentage ?? appConfig.defaultCharityPercentage),
+    avatarSeed: String(row.avatar_seed ?? slugify(String(row.name ?? "member"))),
+    stripeCustomerId: row.stripe_customer_id ? String(row.stripe_customer_id) : null,
+  };
+}
+
+function mapSubscription(row: Record<string, unknown>): Subscription {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    plan: row.plan === "yearly" ? "yearly" : "monthly",
+    status:
+      row.status === "active" ||
+      row.status === "inactive" ||
+      row.status === "canceled" ||
+      row.status === "past_due"
+        ? row.status
+        : "inactive",
+    provider: row.provider === "stripe" ? "stripe" : "admin",
+    amountCents: Number(row.amount_cents ?? 0),
+    startedAt: String(row.started_at),
+    renewalDate: String(row.renewal_date),
+    canceledAt: row.canceled_at ? String(row.canceled_at) : null,
+    stripeSubscriptionId: row.stripe_subscription_id ? String(row.stripe_subscription_id) : null,
+    stripePriceId: row.stripe_price_id ? String(row.stripe_price_id) : null,
+  };
+}
+
+function mapScore(row: Record<string, unknown>): ScoreEntry {
+  return {
+    id: String(row.id),
+    userId: String(row.user_id),
+    value: Number(row.value),
+    playedAt: String(row.played_at),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function mapDraw(row: Record<string, unknown>): DrawRun {
+  return {
+    id: String(row.id),
+    monthKey: String(row.month_key),
+    label: String(row.label),
+    mode:
+      row.mode === "hot" || row.mode === "cold" || row.mode === "random"
+        ? row.mode
+        : "random",
+    status:
+      row.status === "draft" || row.status === "simulated" || row.status === "published"
+        ? row.status
+        : "draft",
+    winningNumbers: Array.isArray(row.winning_numbers)
+      ? row.winning_numbers.map((value) => Number(value))
+      : [],
+    activeSubscriberCount: Number(row.active_subscriber_count ?? 0),
+    prizePoolCents: Number(row.prize_pool_cents ?? 0),
+    rolloverCents: Number(row.rollover_cents ?? 0),
+    winners: parseDrawWinners(row.winners),
+    publishedAt: row.published_at ? String(row.published_at) : null,
+    createdAt: String(row.created_at),
+  };
+}
+
+function mapClaim(row: Record<string, unknown>): WinnerClaim {
+  return {
+    id: String(row.id),
+    drawId: String(row.draw_id),
+    userId: String(row.user_id),
+    proofId: String(row.proof_id),
+    fileName: String(row.file_name),
+    proofPath: String(row.proof_path),
+    submittedAt: String(row.submitted_at),
+    reviewStatus:
+      row.review_status === "approved" || row.review_status === "rejected"
+        ? row.review_status
+        : "pending",
+    paymentStatus:
+      row.payment_status === "processing" || row.payment_status === "paid" || row.payment_status === "rejected"
+        ? row.payment_status
+        : "pending",
+    notes: String(row.notes ?? ""),
+  };
+}
+
+function mapNotification(row: Record<string, unknown>): SystemNotification {
+  return {
+    id: String(row.id),
+    type:
+      row.type === "subscription" || row.type === "draw" || row.type === "winner" || row.type === "proof"
+        ? row.type
+        : "signup",
+    channel: row.channel === "email" ? "email" : "system",
+    subject: String(row.subject),
+    preview: String(row.preview),
+    userId: row.user_id ? String(row.user_id) : null,
+    createdAt: String(row.created_at),
+    status: row.status === "sent" ? "sent" : "skipped",
+  };
+}
+
+function mapAuditLog(row: Record<string, unknown>): AuditLog {
+  return {
+    id: String(row.id),
+    actorUserId: row.actor_user_id ? String(row.actor_user_id) : null,
+    entityType: String(row.entity_type),
+    entityId: row.entity_id ? String(row.entity_id) : null,
+    action: String(row.action),
+    detail: String(row.detail),
+    createdAt: String(row.created_at),
+  };
+}
+
+async function ensureSeedCharities() {
+  if (!appConfig.hasSupabaseAdmin) {
+    return;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { count, error } = await supabase
+    .from("charities")
+    .select("id", { count: "exact", head: true });
+
+  if (error) {
+    throw error;
+  }
+
+  if ((count ?? 0) > 0) {
+    return;
+  }
+
+  const rows = seedCharities.map((charity) => ({
+    id: charity.id,
+    slug: charity.slug,
+    name: charity.name,
+    location: charity.location,
+    headline: charity.headline,
+    summary: charity.summary,
+    mission: charity.mission,
+    image_gradient: charity.imageGradient,
+    featured: charity.featured,
+    tags: charity.tags,
+    events: charity.events,
+  }));
+
+  const { error: insertError } = await supabase
+    .from("charities")
+    .upsert(rows, { onConflict: "id" });
+
+  if (insertError) {
+    throw insertError;
+  }
+}
+
+async function insertNotification(input: Omit<SystemNotification, "id" | "createdAt">) {
+  if (!appConfig.hasSupabaseAdmin) {
+    return;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  await supabase.from("notifications").insert({
+    id: randomUUID(),
+    type: input.type,
+    channel: input.channel,
+    subject: input.subject,
+    preview: input.preview,
+    user_id: input.userId ?? null,
+    status: input.status,
+  });
+}
+
+async function insertAuditLog(input: Omit<AuditLog, "id" | "createdAt">) {
+  if (!appConfig.hasSupabaseAdmin) {
+    return;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  await supabase.from("audit_logs").insert({
+    id: randomUUID(),
+    actor_user_id: input.actorUserId ?? null,
+    entity_type: input.entityType,
+    entity_id: input.entityId ?? null,
+    action: input.action,
+    detail: input.detail,
+  });
+}
+
+async function trimScoresToLatestFive(userId: string) {
+  const supabase = ensureSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("scores")
+    .select("id, user_id, value, played_at, created_at, updated_at")
+    .eq("user_id", userId)
+    .order("played_at", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const scores = (data ?? []).map((row) => mapScore(row));
+  const keepIds = new Set(keepLatestScores(scores).map((score) => score.id));
+  const deleteIds = scores.filter((score) => !keepIds.has(score.id)).map((score) => score.id);
+
+  if (deleteIds.length > 0) {
+    const { error: deleteError } = await supabase.from("scores").delete().in("id", deleteIds);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+  }
+}
+
+function fallbackPublicSnapshot() {
+  return {
+    featuredCharities: seedCharities.filter((charity) => charity.featured),
+    subscriberCount: 0,
+    totalRaisedCents: 0,
+    latestDraw: null,
+  };
 }
 
 export async function listCharities() {
-  const state = await readState();
-  return state.charities;
+  if (!appConfig.hasSupabaseAdmin) {
+    return seedCharities;
+  }
+
+  await ensureSeedCharities();
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("charities")
+    .select("*")
+    .order("featured", { ascending: false })
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((row) => mapCharity(row));
 }
 
 export async function getPublicSnapshot() {
-  const state = await readState();
-  const activeSubscriptions = state.subscriptions.filter(
-    (subscription) => subscription.status === "active",
+  if (!appConfig.hasSupabaseAdmin) {
+    return fallbackPublicSnapshot();
+  }
+
+  await ensureSeedCharities();
+  const supabase = createSupabaseAdminClient();
+
+  const results = await Promise.all([
+    supabase.from("charities").select("*").eq("featured", true).order("name"),
+    supabase.from("subscriptions").select("*").eq("status", "active"),
+    supabase.from("profiles").select("id, charity_percentage"),
+    supabase.from("draws").select("*").eq("status", "published").order("created_at", { ascending: false }).limit(1),
+  ]);
+
+  const [charities, subscriptions, profiles, draws] = results;
+
+  if (charities.error) throw charities.error;
+  if (subscriptions.error) throw subscriptions.error;
+  if (profiles.error) throw profiles.error;
+  if (draws.error) throw draws.error;
+
+  const profilePercentages = new Map(
+    (profiles.data ?? []).map((profile) => [
+      String(profile.id),
+      Number(profile.charity_percentage ?? appConfig.defaultCharityPercentage),
+    ]),
   );
-  const totalRaisedCents = activeSubscriptions.reduce((sum, subscription) => {
-    const user = state.users.find((entry) => entry.id === subscription.userId);
+
+  const totalRaisedCents = (subscriptions.data ?? []).reduce((sum, row) => {
+    const subscription = mapSubscription(row);
     const monthlyEquivalent = getMonthlyEquivalentCents(subscription);
-    return (
-      sum +
-      Math.round(monthlyEquivalent * ((user?.charityPercentage ?? 0) / 100))
-    );
+    const charityPercentage = profilePercentages.get(subscription.userId) ?? 0;
+    return sum + Math.round(monthlyEquivalent * (charityPercentage / 100));
   }, 0);
 
   return {
-    featuredCharities: state.charities.filter((charity) => charity.featured),
-    subscriberCount: activeSubscriptions.length,
+    featuredCharities: (charities.data ?? []).map((row) => mapCharity(row)),
+    subscriberCount: subscriptions.data?.length ?? 0,
     totalRaisedCents,
-    latestDraw: getLatestPublishedDraw(state),
+    latestDraw: draws.data?.[0] ? mapDraw(draws.data[0]) : null,
   };
 }
 
 export async function getCharityBySlug(slug: string) {
-  const state = await readState();
-  return state.charities.find((charity) => charity.slug === slug) ?? null;
-}
+  if (!appConfig.hasSupabaseAdmin) {
+    return seedCharities.find((charity) => charity.slug === slug) ?? null;
+  }
 
-export async function findUserByEmail(email: string) {
-  const state = await readState();
-  return (
-    state.users.find(
-      (user) => user.email.toLowerCase() === email.trim().toLowerCase(),
-    ) ?? null
-  );
+  await ensureSeedCharities();
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("charities").select("*").eq("slug", slug).maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapCharity(data) : null;
 }
 
 export async function getUserById(userId: string) {
-  const state = await readState();
-  return state.users.find((user) => user.id === userId) ?? null;
+  if (!appConfig.hasSupabaseAdmin) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapUser(data) : null;
 }
 
-export async function createUser(input: {
+export async function getUserSubscription(userId: string) {
+  if (!appConfig.hasSupabaseAdmin) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("subscriptions").select("*").eq("user_id", userId).maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? mapSubscription(data) : null;
+}
+
+export async function provisionUserAccount(input: {
+  userId: string;
   name: string;
   email: string;
-  passwordHash: string;
   plan: SubscriptionPlan;
   charityId: string;
   charityPercentage: number;
 }) {
-  const state = await readState();
-  const existingUser = state.users.find(
-    (user) => user.email.toLowerCase() === input.email.toLowerCase(),
-  );
-
-  if (existingUser) {
-    throw new Error("An account with that email already exists.");
-  }
+  const supabase = ensureSupabaseAdmin();
+  await ensureSeedCharities();
 
   const now = getIsoNow();
-  const userId = nanoid();
-  const subscriptionId = nanoid();
   const startedAt = format(new Date(), "yyyy-MM-dd");
+  const role = isConfiguredAdminEmail(input.email) ? "admin" : "subscriber";
 
-  const user: User = {
-    id: userId,
-    name: input.name,
-    email: input.email.trim().toLowerCase(),
-    passwordHash: input.passwordHash,
-    role: "subscriber",
-    createdAt: now,
-    selectedCharityId: input.charityId,
-    charityPercentage: input.charityPercentage,
-    avatarSeed: input.name.toLowerCase().replace(/\s+/g, "-"),
-  };
+  const { error: profileError } = await supabase.from("profiles").upsert(
+    {
+      id: input.userId,
+      email: input.email.trim().toLowerCase(),
+      name: input.name,
+      role,
+      selected_charity_id: input.charityId,
+      charity_percentage: input.charityPercentage,
+      avatar_seed: slugify(input.name),
+      updated_at: now,
+    },
+    { onConflict: "id" },
+  );
 
-  const subscription: Subscription = {
-    id: subscriptionId,
-    userId,
-    plan: input.plan,
-    status: "active",
-    provider: "demo",
-    amountCents: planCatalog[input.plan].priceCents,
-    startedAt,
-    renewalDate: getNextRenewalDate(startedAt, input.plan),
-  };
+  if (profileError) {
+    throw profileError;
+  }
 
-  state.users.push(user);
-  state.subscriptions.push(subscription);
-  addNotification(state, {
-    type: "signup",
-    channel: "system",
-    userId,
-    subject: "Welcome to Birdie for Good",
-    preview: `${user.name} joined on the ${input.plan} plan.`,
-    status: "sent",
-  });
+  const { error: subscriptionError } = await supabase.from("subscriptions").upsert(
+    {
+      user_id: input.userId,
+      plan: input.plan,
+      status: appConfig.hasStripeCheckout ? "inactive" : "active",
+      provider: appConfig.hasStripeCheckout ? "stripe" : "admin",
+      amount_cents: planCatalog[input.plan].priceCents,
+      started_at: startedAt,
+      renewal_date: getNextRenewalDate(startedAt, input.plan),
+    },
+    { onConflict: "user_id" },
+  );
 
-  await persistState(state);
-  return user;
+  if (subscriptionError) {
+    throw subscriptionError;
+  }
+
+  await Promise.all([
+    insertNotification({
+      type: "signup",
+      channel: "system",
+      userId: input.userId,
+      subject: "Welcome to Birdie for Good",
+      preview: `${input.name} joined on the ${input.plan} plan.`,
+      status: "sent",
+    }),
+    insertAuditLog({
+      actorUserId: input.userId,
+      entityType: "profile",
+      entityId: input.userId,
+      action: "signup_provisioned",
+      detail: `Provisioned ${role} profile and ${input.plan} subscription preference.`,
+    }),
+  ]);
+
+  return getUserById(input.userId);
 }
 
-export async function getDashboardSnapshot(
-  userId: string,
-): Promise<DashboardSnapshot | null> {
-  const state = await readState();
-  const user = state.users.find((entry) => entry.id === userId);
+export async function getDashboardSnapshot(userId: string): Promise<DashboardSnapshot | null> {
+  if (!appConfig.hasSupabaseAdmin) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  await ensureSeedCharities();
+
+  const [user, subscription, charities, scoreRows, drawRows, claimRows] = await Promise.all([
+    getUserById(userId),
+    getUserSubscription(userId),
+    listCharities(),
+    supabase.from("scores").select("*").eq("user_id", userId).order("played_at", { ascending: false }).order("created_at", { ascending: false }),
+    supabase.from("draws").select("*").order("created_at", { ascending: false }),
+    supabase.from("winner_claims").select("*").eq("user_id", userId).order("submitted_at", { ascending: false }),
+  ]);
 
   if (!user) {
     return null;
   }
 
-  const subscription = getSubscriptionForUser(state, userId);
-  const selectedCharity =
-    state.charities.find((charity) => charity.id === user.selectedCharityId) ??
-    state.charities[0];
-  const scores = keepLatestScores(
-    state.scores.filter((score) => score.userId === userId),
-  );
-  const draws = [...state.draws].sort((left, right) =>
-    compareDesc(parseISO(left.createdAt), parseISO(right.createdAt)),
-  );
-  const pendingClaim =
-    state.claims.find(
-      (claim) =>
-        claim.userId === userId &&
-        (claim.reviewStatus === "pending" || claim.paymentStatus !== "paid"),
-    ) ?? null;
+  if (scoreRows.error) throw scoreRows.error;
+  if (drawRows.error) throw drawRows.error;
+  if (claimRows.error) throw claimRows.error;
+
+  const scores = keepLatestScores((scoreRows.data ?? []).map((row) => mapScore(row)));
+  const draws = (drawRows.data ?? []).map((row) => mapDraw(row));
+  const claims = (claimRows.data ?? []).map((row) => mapClaim(row));
+  const selectedCharity = charities.find((charity) => charity.id === user.selectedCharityId) ?? charities[0];
+  const pendingClaim = claims.find((claim) => claim.reviewStatus === "pending" || claim.paymentStatus !== "paid") ?? null;
   const winningsCents = draws.reduce(
-    (sum, draw) =>
-      sum +
-      draw.winners
-        .filter((winner) => winner.userId === userId)
-        .reduce((winnerSum, winner) => winnerSum + winner.prizeCents, 0),
+    (sum, draw) => sum + draw.winners.filter((winner) => winner.userId === user.id).reduce((winnerSum, winner) => winnerSum + winner.prizeCents, 0),
     0,
   );
 
@@ -395,189 +584,243 @@ export async function getDashboardSnapshot(
   };
 }
 
-export async function addScore(
-  userId: string,
-  input: {
-    value: number;
-    playedAt: string;
-  },
-) {
-  const state = await readState();
+export async function addScore(userId: string, input: { value: number; playedAt: string }) {
+  const supabase = ensureSupabaseAdmin();
   const now = getIsoNow();
-  const nextScores = keepLatestScores([
-    ...state.scores.filter((score) => score.userId === userId),
-    {
-      id: nanoid(),
-      userId,
-      value: input.value,
-      playedAt: input.playedAt,
-      createdAt: now,
-      updatedAt: now,
-    },
+  const { error } = await supabase.from("scores").insert({
+    id: randomUUID(),
+    user_id: userId,
+    value: input.value,
+    played_at: input.playedAt,
+    created_at: now,
+    updated_at: now,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await Promise.all([
+    trimScoresToLatestFive(userId),
+    insertAuditLog({
+      actorUserId: userId,
+      entityType: "score",
+      action: "score_added",
+      detail: `Added score ${input.value} for ${input.playedAt}.`,
+    }),
   ]);
-
-  state.scores = [
-    ...state.scores.filter((score) => score.userId !== userId),
-    ...nextScores,
-  ];
-
-  await persistState(state);
 }
 
-export async function updateScore(
-  userId: string,
-  input: {
-    scoreId: string;
-    value: number;
-    playedAt: string;
-  },
-) {
-  const state = await readState();
+export async function updateScore(userId: string, input: { scoreId: string; value: number; playedAt: string }) {
+  const supabase = ensureSupabaseAdmin();
+  const { error } = await supabase
+    .from("scores")
+    .update({ value: input.value, played_at: input.playedAt, updated_at: getIsoNow() })
+    .eq("id", input.scoreId)
+    .eq("user_id", userId);
 
-  state.scores = state.scores.map((score) =>
-    score.id === input.scoreId && score.userId === userId
-      ? {
-          ...score,
-          value: input.value,
-          playedAt: input.playedAt,
-          updatedAt: getIsoNow(),
-        }
-      : score,
-  );
+  if (error) {
+    throw error;
+  }
 
-  const normalized = keepLatestScores(
-    state.scores.filter((score) => score.userId === userId),
-  );
-
-  state.scores = [
-    ...state.scores.filter((score) => score.userId !== userId),
-    ...normalized,
-  ];
-
-  await persistState(state);
+  await Promise.all([
+    trimScoresToLatestFive(userId),
+    insertAuditLog({
+      actorUserId: userId,
+      entityType: "score",
+      entityId: input.scoreId,
+      action: "score_updated",
+      detail: `Updated score to ${input.value} for ${input.playedAt}.`,
+    }),
+  ]);
 }
 
-export async function updateCharityPreference(
-  userId: string,
-  input: {
-    charityId: string;
-    charityPercentage: number;
-  },
-) {
-  const state = await readState();
-  state.users = state.users.map((user) =>
-    user.id === userId
-      ? {
-          ...user,
-          selectedCharityId: input.charityId,
-          charityPercentage: input.charityPercentage,
-        }
-      : user,
-  );
+export async function updateCharityPreference(userId: string, input: { charityId: string; charityPercentage: number }) {
+  const supabase = ensureSupabaseAdmin();
+  const { error } = await supabase
+    .from("profiles")
+    .update({ selected_charity_id: input.charityId, charity_percentage: input.charityPercentage, updated_at: getIsoNow() })
+    .eq("id", userId);
 
-  await persistState(state);
+  if (error) {
+    throw error;
+  }
+
+  await insertAuditLog({
+    actorUserId: userId,
+    entityType: "profile",
+    entityId: userId,
+    action: "charity_preference_updated",
+    detail: `Selected charity ${input.charityId} at ${input.charityPercentage} percent.`,
+  });
 }
 
-export async function submitClaim(
-  userId: string,
-  input: {
-    drawId: string;
-    fileName: string;
-  },
-) {
-  const state = await readState();
-  const existingClaim = state.claims.find(
-    (claim) => claim.drawId === input.drawId && claim.userId === userId,
-  );
+export async function saveProofFile(userId: string, proofId: string, fileName: string, bytes: Uint8Array) {
+  const supabase = ensureSupabaseAdmin();
+  const safeName = normalizeFileName(fileName);
+  const proofPath = `${userId}/${proofId}-${safeName}`;
 
-  if (existingClaim) {
+  const { error } = await supabase.storage.from(storageBucket).upload(proofPath, bytes, {
+    contentType: "application/octet-stream",
+    upsert: false,
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return proofPath;
+}
+
+export async function createWinnerClaim(
+  userId: string,
+  input: { drawId: string; proofId: string; proofPath: string; fileName: string },
+) {
+  const supabase = ensureSupabaseAdmin();
+  const existingClaim = await supabase.from("winner_claims").select("id").eq("draw_id", input.drawId).eq("user_id", userId).maybeSingle();
+
+  if (existingClaim.error) {
+    throw existingClaim.error;
+  }
+
+  if (existingClaim.data) {
     throw new Error("A verification proof already exists for this draw.");
   }
 
-  const claim: WinnerClaim = {
-    id: nanoid(),
-    drawId: input.drawId,
-    userId,
-    proofId: nanoid(),
-    fileName: input.fileName,
-    submittedAt: getIsoNow(),
-    reviewStatus: "pending",
-    paymentStatus: "pending",
-    notes: "Awaiting admin review.",
-  };
+  const { data, error } = await supabase
+    .from("winner_claims")
+    .insert({
+      id: randomUUID(),
+      draw_id: input.drawId,
+      user_id: userId,
+      proof_id: input.proofId,
+      proof_path: input.proofPath,
+      file_name: input.fileName,
+      review_status: "pending",
+      payment_status: "pending",
+      notes: "Awaiting admin review.",
+    })
+    .select("*")
+    .single();
 
-  state.claims.unshift(claim);
-  addNotification(state, {
-    type: "proof",
-    channel: "system",
-    userId,
-    subject: "Winner proof submitted",
-    preview: `${input.fileName} is ready for admin review.`,
-    status: "sent",
-  });
+  if (error) {
+    throw error;
+  }
 
-  await persistState(state);
-  return claim;
+  await Promise.all([
+    insertNotification({
+      type: "proof",
+      channel: "system",
+      userId,
+      subject: "Winner proof submitted",
+      preview: `${input.fileName} is ready for admin review.`,
+      status: "sent",
+    }),
+    insertAuditLog({
+      actorUserId: userId,
+      entityType: "claim",
+      entityId: String(data.id),
+      action: "proof_submitted",
+      detail: `Uploaded ${input.fileName} for draw ${input.drawId}.`,
+    }),
+  ]);
+
+  return mapClaim(data);
 }
 
-export async function saveProofFile(
-  proofId: string,
-  fileName: string,
-  bytes: Uint8Array,
-) {
-  await ensureDemoState();
-  const target = path.join(uploadsDirectory, `${proofId}-${fileName}`);
-  await writeFile(target, bytes);
-  return target;
-}
+export async function getProofAsset(proofId: string) {
+  const supabase = ensureSupabaseAdmin();
+  const { data: claim, error } = await supabase.from("winner_claims").select("proof_path, file_name").eq("proof_id", proofId).maybeSingle();
 
-export async function getProofFilePath(proofId: string) {
-  await ensureDemoState();
-  const state = await readState();
-  const claim = state.claims.find((entry) => entry.proofId === proofId);
+  if (error) {
+    throw error;
+  }
 
   if (!claim) {
     return null;
   }
 
-  return path.join(uploadsDirectory, `${claim.proofId}-${claim.fileName}`);
-}
+  const { data, error: downloadError } = await supabase.storage.from(storageBucket).download(String(claim.proof_path));
 
-export async function getAdminSnapshot() {
-  const state = await readState();
-  const activeSubscriptions = state.subscriptions.filter(
-    (subscription) => subscription.status === "active",
-  );
-
-  const totalCharityContribution = activeSubscriptions.reduce(
-    (sum, subscription) => {
-      const user = state.users.find((entry) => entry.id === subscription.userId);
-      const monthlyEquivalent = getMonthlyEquivalentCents(subscription);
-      return (
-        sum +
-        Math.round(monthlyEquivalent * ((user?.charityPercentage ?? 0) / 100))
-      );
-    },
-    0,
-  );
+  if (downloadError) {
+    throw downloadError;
+  }
 
   return {
-    users: state.users,
-    subscriptions: state.subscriptions,
-    charities: state.charities,
-    scores: state.scores,
-    draws: state.draws,
-    claims: state.claims,
-    notifications: state.notifications.slice(0, 8),
+    fileName: String(claim.file_name),
+    buffer: Buffer.from(await data.arrayBuffer()),
+  };
+}
+
+export async function getAdminSnapshot(): Promise<AdminSnapshot> {
+  if (!appConfig.hasSupabaseAdmin) {
+    return {
+      users: [],
+      subscriptions: [],
+      charities: seedCharities,
+      scores: [],
+      draws: [],
+      claims: [],
+      notifications: [],
+      auditLogs: [],
+      analytics: {
+        totalUsers: 0,
+        activeSubscribers: 0,
+        totalPrizePool: 0,
+        totalCharityContribution: 0,
+        drawCount: 0,
+      },
+    };
+  }
+
+  const supabase = createSupabaseAdminClient();
+  await ensureSeedCharities();
+
+  const [profiles, subscriptions, charities, scores, draws, claims, notifications, auditLogs] = await Promise.all([
+    supabase.from("profiles").select("*").order("created_at", { ascending: false }),
+    supabase.from("subscriptions").select("*").order("started_at", { ascending: false }),
+    supabase.from("charities").select("*").order("featured", { ascending: false }).order("name"),
+    supabase.from("scores").select("*").order("played_at", { ascending: false }),
+    supabase.from("draws").select("*").order("created_at", { ascending: false }),
+    supabase.from("winner_claims").select("*").order("submitted_at", { ascending: false }),
+    supabase.from("notifications").select("*").order("created_at", { ascending: false }).limit(8),
+    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }).limit(8),
+  ]);
+
+  if (profiles.error) throw profiles.error;
+  if (subscriptions.error) throw subscriptions.error;
+  if (charities.error) throw charities.error;
+  if (scores.error) throw scores.error;
+  if (draws.error) throw draws.error;
+  if (claims.error) throw claims.error;
+  if (notifications.error) throw notifications.error;
+  if (auditLogs.error) throw auditLogs.error;
+
+  const users = (profiles.data ?? []).map((row) => mapUser(row));
+  const mappedSubscriptions = (subscriptions.data ?? []).map((row) => mapSubscription(row));
+  const mappedDraws = (draws.data ?? []).map((row) => mapDraw(row));
+  const activeSubscriptions = mappedSubscriptions.filter((subscription) => subscription.status === "active");
+  const totalCharityContribution = activeSubscriptions.reduce((sum, subscription) => {
+    const user = users.find((entry) => entry.id === subscription.userId);
+    const monthlyEquivalent = getMonthlyEquivalentCents(subscription);
+    return sum + Math.round(monthlyEquivalent * ((user?.charityPercentage ?? 0) / 100));
+  }, 0);
+
+  return {
+    users,
+    subscriptions: mappedSubscriptions,
+    charities: (charities.data ?? []).map((row) => mapCharity(row)),
+    scores: (scores.data ?? []).map((row) => mapScore(row)),
+    draws: mappedDraws,
+    claims: (claims.data ?? []).map((row) => mapClaim(row)),
+    notifications: (notifications.data ?? []).map((row) => mapNotification(row)),
+    auditLogs: (auditLogs.data ?? []).map((row) => mapAuditLog(row)),
     analytics: {
-      totalUsers: state.users.length,
+      totalUsers: users.length,
       activeSubscribers: activeSubscriptions.length,
-      totalPrizePool: state.draws.reduce(
-        (sum, draw) => sum + draw.prizePoolCents,
-        0,
-      ),
+      totalPrizePool: mappedDraws.reduce((sum, draw) => sum + draw.prizePoolCents, 0),
       totalCharityContribution,
-      drawCount: state.draws.length,
+      drawCount: mappedDraws.length,
     },
   };
 }
@@ -587,29 +830,56 @@ export async function createOrUpdateSubscription(
   input: {
     plan: SubscriptionPlan;
     status: SubscriptionStatus;
+    provider?: Subscription["provider"];
+    stripeSubscriptionId?: string | null;
+    stripePriceId?: string | null;
+    stripeCustomerId?: string | null;
+    startedAt?: string;
+    renewalDate?: string;
+    canceledAt?: string | null;
   },
 ) {
-  const state = await readState();
-  const existing = getSubscriptionForUser(state, userId);
-  const startedAt = format(new Date(), "yyyy-MM-dd");
-  const nextSubscription: Subscription = {
-    id: existing?.id ?? nanoid(),
-    userId,
-    plan: input.plan,
-    status: input.status,
-    provider: "demo",
-    amountCents: planCatalog[input.plan].priceCents,
-    startedAt,
-    renewalDate: getNextRenewalDate(startedAt, input.plan),
-    canceledAt: input.status === "canceled" ? startedAt : undefined,
-  };
+  const supabase = ensureSupabaseAdmin();
+  const startedAt = input.startedAt ?? format(new Date(), "yyyy-MM-dd");
+  const renewalDate = input.renewalDate ?? getNextRenewalDate(startedAt, input.plan);
+  const provider = input.provider ?? (input.stripeSubscriptionId ? "stripe" : "admin");
 
-  state.subscriptions = [
-    ...state.subscriptions.filter((subscription) => subscription.userId !== userId),
-    nextSubscription,
-  ];
+  const { data, error } = await supabase
+    .from("subscriptions")
+    .upsert(
+      {
+        user_id: userId,
+        plan: input.plan,
+        status: input.status,
+        provider,
+        amount_cents: planCatalog[input.plan].priceCents,
+        started_at: startedAt,
+        renewal_date: renewalDate,
+        canceled_at: input.canceledAt ?? (input.status === "canceled" ? startedAt : null),
+        stripe_subscription_id: input.stripeSubscriptionId ?? null,
+        stripe_price_id: input.stripePriceId ?? null,
+      },
+      { onConflict: "user_id" },
+    )
+    .select("*")
+    .single();
 
-  addNotification(state, {
+  if (error) {
+    throw error;
+  }
+
+  if (input.stripeCustomerId) {
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({ stripe_customer_id: input.stripeCustomerId, updated_at: getIsoNow() })
+      .eq("id", userId);
+
+    if (profileError) {
+      throw profileError;
+    }
+  }
+
+  await insertNotification({
     type: "subscription",
     channel: "system",
     userId,
@@ -618,90 +888,124 @@ export async function createOrUpdateSubscription(
     status: "sent",
   });
 
-  await persistState(state);
+  return mapSubscription(data);
 }
 
-export async function createCharity(input: {
-  name: string;
-  location: string;
-  headline: string;
-  summary: string;
-}) {
-  const state = await readState();
-  state.charities.unshift({
-    id: nanoid(),
-    slug: input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+export async function createCharity(input: { name: string; location: string; headline: string; summary: string }) {
+  const supabase = ensureSupabaseAdmin();
+  const payload = {
+    id: randomUUID(),
+    slug: slugify(input.name),
     name: input.name,
     location: input.location,
     headline: input.headline,
     summary: input.summary,
     mission: input.summary,
-    imageGradient: "from-sky-500 via-cyan-500 to-emerald-500",
+    image_gradient: "from-sky-500 via-cyan-500 to-emerald-500",
     featured: false,
     tags: ["Community"],
     events: [],
-  });
+  };
 
-  await persistState(state);
+  const { error } = await supabase.from("charities").insert(payload);
+
+  if (error) {
+    throw error;
+  }
+
+  await insertAuditLog({
+    actorUserId: null,
+    entityType: "charity",
+    entityId: payload.id,
+    action: "charity_created",
+    detail: `Added charity ${input.name}.`,
+  });
 }
 
 export async function reviewClaim(
   claimId: string,
-  input: {
-    reviewStatus: ReviewStatus;
-    paymentStatus: WinnerClaim["paymentStatus"];
-    notes: string;
-  },
+  input: { reviewStatus: ReviewStatus; paymentStatus: WinnerClaim["paymentStatus"]; notes: string },
 ) {
-  const state = await readState();
-  const claim = state.claims.find((entry) => entry.id === claimId);
+  const supabase = ensureSupabaseAdmin();
+  const { data: claimRow, error: claimError } = await supabase.from("winner_claims").select("*").eq("id", claimId).single();
 
-  if (!claim) {
-    throw new Error("Claim not found.");
+  if (claimError) {
+    throw claimError;
   }
 
-  claim.reviewStatus = input.reviewStatus;
-  claim.paymentStatus = input.paymentStatus;
-  claim.notes = input.notes;
+  const claim = mapClaim(claimRow);
+  const { error: updateError } = await supabase
+    .from("winner_claims")
+    .update({ review_status: input.reviewStatus, payment_status: input.paymentStatus, notes: input.notes })
+    .eq("id", claimId);
 
-  state.draws = state.draws.map((draw) => ({
-    ...draw,
-    winners: draw.winners.map((winner) =>
-      winner.userId === claim.userId &&
-      winner.status !== "paid" &&
-      draw.id === claim.drawId
-        ? {
-            ...winner,
-            status: input.paymentStatus,
-          }
-        : winner,
-    ),
-  }));
+  if (updateError) {
+    throw updateError;
+  }
 
-  addNotification(state, {
-    type: "winner",
-    channel: "system",
-    userId: claim.userId,
-    subject: "Winner claim reviewed",
-    preview: input.notes,
-    status: "sent",
-  });
+  const { data: drawRow, error: drawError } = await supabase.from("draws").select("*").eq("id", claim.drawId).single();
 
-  await persistState(state);
+  if (drawError) {
+    throw drawError;
+  }
+
+  const draw = mapDraw(drawRow);
+  const winners = draw.winners.map((winner) =>
+    winner.userId === claim.userId && draw.id === claim.drawId
+      ? { ...winner, status: input.paymentStatus }
+      : winner,
+  );
+
+  const { error: drawUpdateError } = await supabase.from("draws").update({ winners }).eq("id", draw.id);
+
+  if (drawUpdateError) {
+    throw drawUpdateError;
+  }
+
+  const user = await getUserById(claim.userId);
+  if (user) {
+    await sendPlatformEmail({
+      to: user.email,
+      subject: "Your claim review has been updated",
+      html: `<p>${input.notes}</p>`,
+    });
+  }
+
+  await Promise.all([
+    insertNotification({
+      type: "winner",
+      channel: "system",
+      userId: claim.userId,
+      subject: "Winner claim reviewed",
+      preview: input.notes,
+      status: "sent",
+    }),
+    insertAuditLog({
+      actorUserId: null,
+      entityType: "claim",
+      entityId: claimId,
+      action: "claim_reviewed",
+      detail: `${input.reviewStatus}/${input.paymentStatus}: ${input.notes}`,
+    }),
+  ]);
 }
 
 export async function runDraw(mode: DrawMode, shouldPublish: boolean) {
-  const state = await readState();
-  const activeSubscriptions = state.subscriptions.filter(
-    (subscription) => subscription.status === "active",
-  );
-  const participantUserIds = activeSubscriptions.map(
-    (subscription) => subscription.userId,
-  );
-  const participantScores = state.scores.filter((score) =>
-    participantUserIds.includes(score.userId),
-  );
-  const previousPublishedDraw = getLatestPublishedDraw(state);
+  const supabase = ensureSupabaseAdmin();
+  const [subscriptionsResult, scoresResult, previousDrawResult] = await Promise.all([
+    supabase.from("subscriptions").select("*").eq("status", "active"),
+    supabase.from("scores").select("*").order("played_at", { ascending: false }),
+    supabase.from("draws").select("*").eq("status", "published").order("created_at", { ascending: false }).limit(1),
+  ]);
+
+  if (subscriptionsResult.error) throw subscriptionsResult.error;
+  if (scoresResult.error) throw scoresResult.error;
+  if (previousDrawResult.error) throw previousDrawResult.error;
+
+  const activeSubscriptions = (subscriptionsResult.data ?? []).map((row) => mapSubscription(row));
+  const participantUserIds = activeSubscriptions.map((subscription) => subscription.userId);
+  const participantScores = (scoresResult.data ?? []).map((row) => mapScore(row)).filter((score) => participantUserIds.includes(score.userId));
+  const previousPublishedDraw = previousDrawResult.data?.[0] ? mapDraw(previousDrawResult.data[0]) : null;
   const rolloverCents = previousPublishedDraw
     ? previousPublishedDraw.winners.some((winner) => winner.matchTier === 5)
       ? 0
@@ -712,73 +1016,188 @@ export async function runDraw(mode: DrawMode, shouldPublish: boolean) {
 
   const winners = participantUserIds
     .map((userId) => {
-      const numbers = keepLatestScores(
-        participantScores.filter((score) => score.userId === userId),
-      ).map((score) => score.value);
+      const numbers = keepLatestScores(participantScores.filter((score) => score.userId === userId)).map((score) => score.value);
       const matchTier = getMatchTier(winningNumbers, numbers);
-
-      return matchTier
-        ? {
-            userId,
-            matchTier,
-          }
-        : null;
+      return matchTier ? { userId, matchTier } : null;
     })
     .filter(Boolean) as Array<{ userId: string; matchTier: MatchTier }>;
 
   const winnersWithPrizes = winners.map((winner) => {
-    const tierWinnerCount = winners.filter(
-      (entry) => entry.matchTier === winner.matchTier,
-    ).length;
-    const tierShare =
-      winner.matchTier === 5 ? 0.4 : winner.matchTier === 4 ? 0.35 : 0.25;
+    const tierWinnerCount = winners.filter((entry) => entry.matchTier === winner.matchTier).length;
+    const tierShare = winner.matchTier === 5 ? 0.4 : winner.matchTier === 4 ? 0.35 : 0.25;
 
     return {
       userId: winner.userId,
       matchTier: winner.matchTier,
-      prizeCents:
-        tierWinnerCount === 0
-          ? 0
-          : Math.round((prizePoolCents * tierShare) / tierWinnerCount),
+      prizeCents: tierWinnerCount === 0 ? 0 : Math.round((prizePoolCents * tierShare) / tierWinnerCount),
       status: shouldPublish ? "pending" : "processing",
     } satisfies DrawRun["winners"][number];
   });
 
-  const draw: DrawRun = {
-    id: nanoid(),
-    monthKey: format(new Date(), "yyyy-MM"),
-    label: format(new Date(), "MMMM yyyy"),
-    mode,
-    status: shouldPublish ? "published" : "simulated",
-    winningNumbers,
-    activeSubscriberCount: activeSubscriptions.length,
-    prizePoolCents,
-    rolloverCents: winnersWithPrizes.some((winner) => winner.matchTier === 5)
-      ? 0
-      : Math.round(prizePoolCents * 0.4),
-    winners: winnersWithPrizes.sort((left, right) => right.matchTier - left.matchTier),
-    publishedAt: shouldPublish ? getIsoNow() : undefined,
-    createdAt: getIsoNow(),
-  };
+  const { data, error } = await supabase
+    .from("draws")
+    .insert({
+      id: randomUUID(),
+      month_key: format(new Date(), "yyyy-MM"),
+      label: format(new Date(), "MMMM yyyy"),
+      mode,
+      status: shouldPublish ? "published" : "simulated",
+      winning_numbers: winningNumbers,
+      active_subscriber_count: activeSubscriptions.length,
+      prize_pool_cents: prizePoolCents,
+      rollover_cents: winnersWithPrizes.some((winner) => winner.matchTier === 5) ? 0 : Math.round(prizePoolCents * 0.4),
+      winners: winnersWithPrizes,
+      published_at: shouldPublish ? getIsoNow() : null,
+    })
+    .select("*")
+    .single();
 
-  state.draws.unshift(draw);
+  if (error) {
+    throw error;
+  }
+
+  const draw = mapDraw(data);
 
   if (shouldPublish) {
-    for (const userId of participantUserIds) {
-      addNotification(state, {
-        type: "draw",
-        channel: "system",
-        userId,
-        subject: `Draw results for ${draw.label}`,
-        preview: `Winning numbers: ${draw.winningNumbers.join(", ")}`,
-        status: "sent",
-      });
+    const notifications = participantUserIds.map((userId) => ({
+      id: randomUUID(),
+      type: "draw",
+      channel: "system",
+      subject: `Draw results for ${draw.label}`,
+      preview: `Winning numbers: ${draw.winningNumbers.join(", ")}`,
+      user_id: userId,
+      status: "sent",
+    }));
+
+    if (notifications.length > 0) {
+      const { error: notificationError } = await supabase.from("notifications").insert(notifications);
+
+      if (notificationError) {
+        logError("draw.notification_insert_failed", {
+          message: notificationError.message,
+          drawId: draw.id,
+        });
+      }
     }
   }
 
-  await persistState(state);
+  await insertAuditLog({
+    actorUserId: null,
+    entityType: "draw",
+    entityId: draw.id,
+    action: shouldPublish ? "draw_published" : "draw_simulated",
+    detail: `${mode} draw processed for ${draw.label}.`,
+  });
+
   return draw;
 }
 
+export async function syncStripeCheckoutCompleted(input: {
+  userId: string;
+  customerId: string | null;
+  subscriptionId: string | null;
+  priceId: string | null;
+  plan: SubscriptionPlan;
+}) {
+  const startedAt = format(new Date(), "yyyy-MM-dd");
 
+  return createOrUpdateSubscription(input.userId, {
+    plan: input.plan,
+    status: "active",
+    provider: "stripe",
+    stripeSubscriptionId: input.subscriptionId,
+    stripePriceId: input.priceId,
+    stripeCustomerId: input.customerId,
+    startedAt,
+    renewalDate: getNextRenewalDate(startedAt, input.plan),
+  });
+}
+
+export async function syncStripeSubscription(input: {
+  userId: string;
+  customerId: string | null;
+  subscriptionId: string;
+  priceId: string | null;
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  startedAt: string;
+  renewalDate: string;
+  canceledAt?: string | null;
+}) {
+  return createOrUpdateSubscription(input.userId, {
+    plan: input.plan,
+    status: input.status,
+    provider: "stripe",
+    stripeSubscriptionId: input.subscriptionId,
+    stripePriceId: input.priceId,
+    stripeCustomerId: input.customerId,
+    startedAt: input.startedAt,
+    renewalDate: input.renewalDate,
+    canceledAt: input.canceledAt ?? null,
+  });
+}
+
+export async function findUserIdByStripeCustomerId(customerId: string) {
+  if (!appConfig.hasSupabaseAdmin) {
+    return null;
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.from("profiles").select("id").eq("stripe_customer_id", customerId).maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ? String(data.id) : null;
+}
+
+export async function getUserBillingDetails(userId: string) {
+  const [user, subscription] = await Promise.all([getUserById(userId), getUserSubscription(userId)]);
+
+  return {
+    user,
+    subscription,
+  };
+}
+
+export async function publishScheduledDraw(mode: DrawMode = "random") {
+  const supabase = ensureSupabaseAdmin();
+  const monthKey = format(new Date(), "yyyy-MM");
+  const { data, error } = await supabase.from("draws").select("id").eq("month_key", monthKey).eq("status", "published").maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (data) {
+    return { status: "skipped" as const, reason: "already_published" as const };
+  }
+
+  const draw = await runDraw(mode, true);
+  return { status: "published" as const, draw };
+}
+
+export async function pingSupabaseHealth() {
+  if (!appConfig.hasSupabaseAdmin) {
+    return { ok: false as const, reason: "missing_env" as const };
+  }
+
+  try {
+    const supabase = createSupabaseAdminClient();
+    const { error } = await supabase.from("charities").select("id").limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    logInfo("supabase.health.ok");
+    return { ok: true as const };
+  } catch (error) {
+    logError("supabase.health.failed", {
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+    return { ok: false as const, reason: "query_failed" as const };
+  }
+}
 

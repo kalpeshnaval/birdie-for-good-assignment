@@ -1,17 +1,22 @@
 ﻿"use server";
 
+import { randomUUID } from "node:crypto";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireSubscriber } from "@/lib/auth";
+import { appConfig } from "@/lib/config";
 import {
   addScore,
   createOrUpdateSubscription,
+  createWinnerClaim,
+  getUserBillingDetails,
   saveProofFile,
-  submitClaim,
   updateCharityPreference,
   updateScore,
 } from "@/lib/store";
+import { createBillingPortalSession, createCheckoutSession } from "@/lib/stripe";
 import { charityPreferenceSchema, scoreSchema } from "@/lib/validation";
 
 function dashboardRedirect(message: string): never {
@@ -40,7 +45,6 @@ export async function updateScoreAction(formData: FormData) {
     value: formData.get("value"),
     playedAt: formData.get("playedAt"),
   });
-
   const scoreId = String(formData.get("scoreId") ?? "");
 
   if (!parsed.success || !scoreId) {
@@ -85,14 +89,19 @@ export async function submitClaimAction(formData: FormData) {
     dashboardRedirect("Proof files must be 5MB or smaller.");
   }
 
-  const claim = await submitClaim(user.id, {
+  const proofId = randomUUID();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const proofPath = await saveProofFile(user.id, proofId, file.name, bytes);
+
+  await createWinnerClaim(user.id, {
     drawId,
+    proofId,
+    proofPath,
     fileName: file.name,
   });
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await saveProofFile(claim.proofId, file.name, bytes);
 
   revalidatePath("/dashboard");
+  revalidatePath("/admin");
   dashboardRedirect("Winner proof submitted for review.");
 }
 
@@ -104,12 +113,53 @@ export async function changePlanAction(formData: FormData) {
     dashboardRedirect("Choose a valid plan.");
   }
 
+  const billing = await getUserBillingDetails(user.id);
+
+  if (appConfig.hasStripeCheckout) {
+    const checkoutSession = await createCheckoutSession({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      plan,
+      charityId: user.selectedCharityId ?? "",
+      charityPercentage: user.charityPercentage,
+      stripeCustomerId: billing.user?.stripeCustomerId ?? null,
+    });
+
+    if (checkoutSession?.url) {
+      redirect(checkoutSession.url);
+    }
+  }
+
   await createOrUpdateSubscription(user.id, {
     plan,
     status: "active",
+    provider: "admin",
   });
 
   revalidatePath("/dashboard");
-  dashboardRedirect(`Plan switched to ${plan}.`);
+  dashboardRedirect(
+    appConfig.hasStripeCheckout
+      ? `Billing session could not start, so ${plan} was saved in manual mode.`
+      : `Plan switched to ${plan} in manual billing mode.`,
+  );
 }
 
+export async function manageBillingAction() {
+  const user = await requireSubscriber();
+  const billing = await getUserBillingDetails(user.id);
+
+  if (!billing.user?.stripeCustomerId) {
+    dashboardRedirect("No Stripe customer record exists yet for this account.");
+  }
+
+  const session = await createBillingPortalSession({
+    customerId: billing.user.stripeCustomerId,
+  });
+
+  if (!session?.url) {
+    dashboardRedirect("Stripe billing portal is not configured yet.");
+  }
+
+  redirect(session.url);
+}

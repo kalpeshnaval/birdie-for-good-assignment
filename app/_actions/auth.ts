@@ -2,17 +2,26 @@
 
 import { redirect } from "next/navigation";
 
-import { createSession, clearSession } from "@/lib/session";
-import { findUserByEmail, createUser } from "@/lib/store";
-import { hashPassword, verifyPassword } from "@/lib/hash";
-import { signupSchema, authSchema } from "@/lib/validation";
+import { appConfig } from "@/lib/config";
 import { sendPlatformEmail } from "@/lib/providers";
+import { createCheckoutSession } from "@/lib/stripe";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { provisionUserAccount } from "@/lib/store";
+import { authSchema, signupSchema } from "@/lib/validation";
 
 type AuthState = {
   message?: string;
 };
 
+function getAuthUnavailableMessage() {
+  return "Supabase auth is not configured yet. Add your Supabase environment variables to enable sign-in.";
+}
+
 export async function loginAction(_: AuthState, formData: FormData) {
+  if (!appConfig.hasSupabase) {
+    return { message: getAuthUnavailableMessage() } satisfies AuthState;
+  }
+
   const parsed = authSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
@@ -24,23 +33,35 @@ export async function loginAction(_: AuthState, formData: FormData) {
     } satisfies AuthState;
   }
 
-  const user = await findUserByEmail(parsed.data.email);
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: parsed.data.email,
+    password: parsed.data.password,
+  });
 
-  if (!user || !verifyPassword(parsed.data.password, user.passwordHash)) {
+  if (error || !data.user) {
     return {
-      message: "The email or password is incorrect.",
+      message: error?.message ?? "The email or password is incorrect.",
     } satisfies AuthState;
   }
 
-  await createSession({
-    userId: user.id,
-    role: user.role,
-  });
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", data.user.id)
+    .maybeSingle();
 
-  redirect(user.role === "admin" ? "/admin" : "/dashboard");
+  redirect(profile?.role === "admin" ? "/admin" : "/dashboard");
 }
 
 export async function signupAction(_: AuthState, formData: FormData) {
+  if (!appConfig.hasSupabase || !appConfig.hasSupabaseAdmin) {
+    return {
+      message:
+        "Supabase is not configured yet. Add the Supabase URL, publishable key, and service role key to enable signup.",
+    } satisfies AuthState;
+  }
+
   const parsed = signupSchema.safeParse({
     name: formData.get("name"),
     email: formData.get("email"),
@@ -56,31 +77,75 @@ export async function signupAction(_: AuthState, formData: FormData) {
     } satisfies AuthState;
   }
 
-  const user = await createUser({
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.auth.signUp({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    options: {
+      data: {
+        name: parsed.data.name,
+      },
+    },
+  });
+
+  if (error || !data.user) {
+    return {
+      message: error?.message ?? "Could not create your account.",
+    } satisfies AuthState;
+  }
+
+  const user = await provisionUserAccount({
+    userId: data.user.id,
     name: parsed.data.name,
     email: parsed.data.email,
-    passwordHash: hashPassword(parsed.data.password),
     plan: parsed.data.plan,
     charityId: parsed.data.charityId,
     charityPercentage: parsed.data.charityPercentage,
   });
 
   await sendPlatformEmail({
-    to: user.email,
+    to: parsed.data.email,
     subject: "Welcome to Birdie for Good",
-    html: `<p>Your account is ready. You can now manage scores, charity impact, and monthly draw entries.</p>`,
+    html: `<p>Your account is ready. Next up: activate billing, manage scores, and track monthly draw momentum.</p>`,
   });
 
-  await createSession({
-    userId: user.id,
-    role: user.role,
+  if (user?.role === "admin") {
+    redirect("/admin?notice=Admin%20account%20created");
+  }
+
+  const checkoutSession = await createCheckoutSession({
+    userId: data.user.id,
+    email: parsed.data.email,
+    name: parsed.data.name,
+    plan: parsed.data.plan,
+    charityId: parsed.data.charityId,
+    charityPercentage: parsed.data.charityPercentage,
+    stripeCustomerId: user?.stripeCustomerId ?? null,
   });
 
-  redirect("/dashboard?notice=Welcome%20aboard");
+  if (checkoutSession?.url) {
+    redirect(checkoutSession.url);
+  }
+
+  if (!data.session) {
+    redirect("/login?notice=Account%20created.%20Verify%20your%20email%20and%20sign%20in.");
+  }
+
+  redirect(
+    "/dashboard?notice=" +
+      encodeURIComponent(
+        appConfig.hasStripeCheckout
+          ? "Account created. Finish billing activation from your dashboard if needed."
+          : "Account created. Stripe is not configured, so billing is in manual mode.",
+      ),
+  );
 }
 
 export async function logoutAction() {
-  await clearSession();
+  if (appConfig.hasSupabase) {
+    const supabase = await createSupabaseServerClient();
+    await supabase.auth.signOut();
+  }
+
   redirect("/");
 }
-

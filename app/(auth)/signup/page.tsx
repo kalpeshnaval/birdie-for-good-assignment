@@ -2,13 +2,20 @@
 
 import { SignupForm } from "@/components/forms/signup-form";
 import { PublicShell } from "@/components/site/public-shell";
-import { Card } from "@/components/ui";
+import { Card, Notice } from "@/components/ui";
 import { listCharities } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
-export default async function SignupPage() {
-  const charities = await listCharities();
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>;
+}) {
+  const [charities, resolvedSearchParams] = await Promise.all([
+    listCharities(),
+    searchParams,
+  ]);
 
   return (
     <PublicShell>
@@ -21,7 +28,7 @@ export default async function SignupPage() {
             Join with a plan, a cause, and a reason to log back in.
           </h1>
           <p className="max-w-xl text-lg leading-8 text-[var(--color-muted)]">
-            Signup creates your subscriber account, activates your demo subscription, and prepares your dashboard for score entry right away.
+            Signup creates your platform account, stores your charity preference in Supabase, and sends you into live subscription billing when Stripe is configured.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Card className="space-y-2">
@@ -37,13 +44,18 @@ export default async function SignupPage() {
           </div>
         </div>
         <Card className="self-start p-8">
-          <SignupForm charities={charities} />
+          <Notice message={resolvedSearchParams.notice} />
+          <div className="mt-4">
+            <SignupForm charities={charities} />
+          </div>
           <p className="mt-6 text-sm text-[var(--color-muted)]">
-            Already subscribed? <Link href="/login" className="font-semibold text-[var(--color-moss)]">Log in here</Link>
+            Already subscribed?{" "}
+            <Link href="/login" className="font-semibold text-[var(--color-moss)]">
+              Log in here
+            </Link>
           </p>
         </Card>
       </div>
     </PublicShell>
   );
 }
-

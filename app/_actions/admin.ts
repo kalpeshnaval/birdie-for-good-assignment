@@ -4,12 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { requireAdmin } from "@/lib/auth";
-import {
-  createCharity,
-  createOrUpdateSubscription,
-  reviewClaim,
-  runDraw,
-} from "@/lib/store";
+import { createCharity, createOrUpdateSubscription, reviewClaim, runDraw } from "@/lib/store";
 import { charityCreateSchema, claimReviewSchema } from "@/lib/validation";
 
 type DrawMode = "random" | "hot" | "cold";
@@ -90,10 +85,7 @@ export async function updateSubscriberPlanAction(formData: FormData) {
   if (
     !userId ||
     (plan !== "monthly" && plan !== "yearly") ||
-    (status !== "active" &&
-      status !== "inactive" &&
-      status !== "canceled" &&
-      status !== "past_due")
+    (status !== "active" && status !== "inactive" && status !== "canceled" && status !== "past_due")
   ) {
     adminRedirect("Subscriber plan update failed.");
   }
@@ -101,10 +93,10 @@ export async function updateSubscriberPlanAction(formData: FormData) {
   await createOrUpdateSubscription(userId, {
     plan,
     status: status as SubscriptionStatus,
+    provider: "admin",
   });
 
   revalidatePath("/admin");
   revalidatePath("/dashboard");
   adminRedirect("Subscriber plan updated.");
 }
-

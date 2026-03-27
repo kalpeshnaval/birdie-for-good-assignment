@@ -8,6 +8,8 @@ export type SubscriptionStatus =
   | "canceled"
   | "past_due";
 
+export type SubscriptionProvider = "stripe" | "admin";
+
 export type DrawMode = "random" | "hot" | "cold";
 
 export type DrawStatus = "draft" | "simulated" | "published";
@@ -31,9 +33,19 @@ export type SystemNotification = {
   channel: "email" | "system";
   subject: string;
   preview: string;
-  userId?: string;
+  userId?: string | null;
   createdAt: string;
   status: "sent" | "skipped";
+};
+
+export type AuditLog = {
+  id: string;
+  actorUserId?: string | null;
+  entityType: string;
+  entityId?: string | null;
+  action: string;
+  detail: string;
+  createdAt: string;
 };
 
 export type CharityEvent = {
@@ -55,18 +67,19 @@ export type Charity = {
   featured: boolean;
   tags: string[];
   events: CharityEvent[];
+  createdAt?: string;
 };
 
 export type User = {
   id: string;
   name: string;
   email: string;
-  passwordHash: string;
   role: UserRole;
   createdAt: string;
-  selectedCharityId: string;
+  selectedCharityId: string | null;
   charityPercentage: number;
   avatarSeed: string;
+  stripeCustomerId?: string | null;
 };
 
 export type Subscription = {
@@ -74,11 +87,13 @@ export type Subscription = {
   userId: string;
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
-  provider: "demo" | "stripe";
+  provider: SubscriptionProvider;
   amountCents: number;
   startedAt: string;
   renewalDate: string;
-  canceledAt?: string;
+  canceledAt?: string | null;
+  stripeSubscriptionId?: string | null;
+  stripePriceId?: string | null;
 };
 
 export type ScoreEntry = {
@@ -108,7 +123,7 @@ export type DrawRun = {
   prizePoolCents: number;
   rolloverCents: number;
   winners: DrawWinner[];
-  publishedAt?: string;
+  publishedAt?: string | null;
   createdAt: string;
 };
 
@@ -118,25 +133,11 @@ export type WinnerClaim = {
   userId: string;
   proofId: string;
   fileName: string;
+  proofPath: string;
   submittedAt: string;
   reviewStatus: ReviewStatus;
   paymentStatus: PaymentStatus;
   notes: string;
-};
-
-export type DemoState = {
-  users: User[];
-  subscriptions: Subscription[];
-  charities: Charity[];
-  scores: ScoreEntry[];
-  draws: DrawRun[];
-  claims: WinnerClaim[];
-  notifications: SystemNotification[];
-};
-
-export type SessionUser = {
-  userId: string;
-  role: UserRole;
 };
 
 export type DashboardSnapshot = {
@@ -149,3 +150,20 @@ export type DashboardSnapshot = {
   winningsCents: number;
 };
 
+export type AdminSnapshot = {
+  users: User[];
+  subscriptions: Subscription[];
+  charities: Charity[];
+  scores: ScoreEntry[];
+  draws: DrawRun[];
+  claims: WinnerClaim[];
+  notifications: SystemNotification[];
+  auditLogs: AuditLog[];
+  analytics: {
+    totalUsers: number;
+    activeSubscribers: number;
+    totalPrizePool: number;
+    totalCharityContribution: number;
+    drawCount: number;
+  };
+};

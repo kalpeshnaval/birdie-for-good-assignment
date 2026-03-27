@@ -1,7 +1,5 @@
-﻿import { readFile } from "node:fs/promises";
-
-import { requireAdmin } from "@/lib/auth";
-import { getProofFilePath } from "@/lib/store";
+﻿import { requireAdmin } from "@/lib/auth";
+import { getProofAsset } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -11,18 +9,16 @@ export async function GET(
 ) {
   await requireAdmin();
   const { proofId } = await params;
-  const filePath = await getProofFilePath(proofId);
+  const asset = await getProofAsset(proofId);
 
-  if (!filePath) {
+  if (!asset) {
     return new Response("Not found", { status: 404 });
   }
 
-  const buffer = await readFile(filePath);
-  return new Response(buffer, {
+  return new Response(asset.buffer, {
     headers: {
       "Content-Type": "application/octet-stream",
-      "Content-Disposition": `inline; filename="${proofId}"`,
+      "Content-Disposition": `inline; filename="${asset.fileName}"`,
     },
   });
 }
-
