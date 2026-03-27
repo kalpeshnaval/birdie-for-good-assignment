@@ -1,0 +1,157 @@
+{
+  "users": [
+    {
+      "id": "user-admin",
+      "name": "Admin Captain",
+      "email": "admin@golfcharity.local",
+      "passwordHash": "58f718b50914d3e309b279b1b4345c16:ec8a6a8e85014739277aa590a46a43919f20803723ca796904b24f810bbc1a1ca66fcef7e9ccc97643755c8a7d617e57fb2b0e568823b04178264bdf9375c452",
+      "role": "admin",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "selectedCharityId": "charity-caddie",
+      "charityPercentage": 15,
+      "avatarSeed": "admin-captain"
+    },
+    {
+      "id": "user-player",
+      "name": "Avery Stone",
+      "email": "player@golfcharity.local",
+      "passwordHash": "6156534593d210cd38885a4c9b74db44:472357526badc4c23c8414f9f64571ec91456b1716a13cade51f3d10be58479d4fd8aa4ffa3e8924ac33950aba448e3b4362917d6149c5629aafdc4e09143e8c",
+      "role": "subscriber",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "selectedCharityId": "charity-river",
+      "charityPercentage": 10,
+      "avatarSeed": "avery-stone"
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "subscription-player",
+      "userId": "user-player",
+      "plan": "yearly",
+      "status": "active",
+      "provider": "demo",
+      "amountCents": 29000,
+      "startedAt": "2026-01-10",
+      "renewalDate": "2027-01-10"
+    }
+  ],
+  "charities": [
+    {
+      "id": "charity-river",
+      "slug": "river-reset",
+      "name": "River Reset",
+      "location": "Austin, Texas",
+      "headline": "Restoring urban waterways through youth-led cleanups.",
+      "summary": "River Reset funds cleanup crews, school workshops, and weekend restoration projects around city water systems.",
+      "mission": "The charity turns every member contribution into visible, local environmental action with volunteer programs and educational events.",
+      "imageGradient": "from-emerald-400 via-teal-500 to-cyan-600",
+      "featured": true,
+      "tags": [
+        "Environment",
+        "Youth",
+        "Community"
+      ],
+      "events": [
+        {
+          "id": "river-event-1",
+          "title": "Spring Charity Scramble",
+          "location": "Barton Creek",
+          "date": "2026-04-19"
+        }
+      ]
+    },
+    {
+      "id": "charity-caddie",
+      "slug": "caddie-futures",
+      "name": "Caddie Futures",
+      "location": "Scottsdale, Arizona",
+      "headline": "Opening pathways into sport, study, and leadership.",
+      "summary": "Caddie Futures supports scholarships, mentorship, and equipment access for underrepresented young golfers.",
+      "mission": "The organization helps talented young players gain confidence, experience, and better opportunities on and off the course.",
+      "imageGradient": "from-amber-400 via-orange-500 to-rose-500",
+      "featured": true,
+      "tags": [
+        "Education",
+        "Sport",
+        "Mentorship"
+      ],
+      "events": [
+        {
+          "id": "caddie-event-1",
+          "title": "Scholarship Invitational",
+          "location": "Troon North",
+          "date": "2026-05-04"
+        }
+      ]
+    },
+    {
+      "id": "charity-heart",
+      "slug": "hearts-on-course",
+      "name": "Hearts on Course",
+      "location": "St Andrews, Scotland",
+      "headline": "Creating calm, outdoor moments for families facing illness.",
+      "summary": "Hearts on Course helps families access respite retreats, counseling, and supportive community experiences.",
+      "mission": "By pairing fundraising with meaningful storytelling, the charity creates tangible emotional support for households under pressure.",
+      "imageGradient": "from-fuchsia-500 via-pink-500 to-orange-400",
+      "featured": true,
+      "tags": [
+        "Health",
+        "Families",
+        "Wellbeing"
+      ],
+      "events": [
+        {
+          "id": "heart-event-1",
+          "title": "Evening Impact Dinner",
+          "location": "Old Course Hotel",
+          "date": "2026-06-12"
+        }
+      ]
+    }
+  ],
+  "scores": [
+    {
+      "id": "score-1",
+      "userId": "user-player",
+      "value": 35,
+      "playedAt": "2026-03-01",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "updatedAt": "2026-03-27T04:41:18.106Z"
+    },
+    {
+      "id": "score-2",
+      "userId": "user-player",
+      "value": 37,
+      "playedAt": "2026-03-05",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "updatedAt": "2026-03-27T04:41:18.106Z"
+    },
+    {
+      "id": "score-3",
+      "userId": "user-player",
+      "value": 31,
+      "playedAt": "2026-03-10",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "updatedAt": "2026-03-27T04:41:18.106Z"
+    },
+    {
+      "id": "score-4",
+      "userId": "user-player",
+      "value": 39,
+      "playedAt": "2026-03-15",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "updatedAt": "2026-03-27T04:41:18.106Z"
+    },
+    {
+      "id": "score-5",
+      "userId": "user-player",
+      "value": 33,
+      "playedAt": "2026-03-21",
+      "createdAt": "2026-03-27T04:41:18.106Z",
+      "updatedAt": "2026-03-27T04:41:18.106Z"
+    }
+  ],
+  "draws": [],
+  "claims": [],
+  "notifications": []
+}

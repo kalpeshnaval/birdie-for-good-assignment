@@ -1,26 +1,80 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f4ee;
+  --foreground: #18221d;
+  --color-sand: #f7f4ee;
+  --color-ink: #18221d;
+  --color-moss: #355c4b;
+  --color-gold: #d79a3b;
+  --color-coral: #e57861;
+  --color-muted: #5e6d66;
+  --font-sans-stack: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-display-stack: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans-stack);
+  --font-display: var(--font-display-stack);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(115, 164, 134, 0.14), transparent 28%),
+    linear-gradient(180deg, #f9f7f2 0%, #f7f4ee 100%);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans-stack);
 }
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(215, 154, 59, 0.28);
+}
+
+[data-surface="mesh"] {
+  background-image:
+    linear-gradient(135deg, rgba(53, 92, 75, 0.08), transparent 45%),
+    radial-gradient(circle at top left, rgba(229, 120, 97, 0.14), transparent 35%),
+    radial-gradient(circle at bottom right, rgba(215, 154, 59, 0.16), transparent 30%);
+}
+
+.ui-solid-action,
+.ui-solid-action:hover,
+.ui-solid-action:focus,
+.ui-solid-action:focus-visible,
+.ui-solid-action:active,
+.ui-solid-action:visited {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  forced-color-adjust: none;
+}
+
+.ui-solid-action * {
+  color: inherit !important;
+  fill: currentColor;
+  stroke: currentColor;
+}
+
